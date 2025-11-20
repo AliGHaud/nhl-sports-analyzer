@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NHL Analyzer Test UI</title>
+  <style>
+    :root {
+      --bg: #0b1221;
+      --panel: #0f172a;
+      --muted: #94a3b8;
+      --border: #1f2937;
+      --accent: #4f46e5;
+      --text: #e2e8f0;
+      --good: #16a34a;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: radial-gradient(circle at 10% 10%, rgba(79,70,229,0.12) 0, transparent 25%), radial-gradient(circle at 90% 20%, rgba(236,72,153,0.12) 0, transparent 25%), var(--bg); color: var(--text); }
+    h1 { margin: 0 0 4px; letter-spacing: 0.02em; }
+    h3 { margin-top: 0; }
+    p { margin: 4px 0; }
+    label { font-weight: 600; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 12px 30px rgba(0,0,0,0.2); margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    select, input { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: #0b1020; color: var(--text); min-width: 120px; }
+    button { padding: 11px 16px; border: none; border-radius: 8px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; cursor: pointer; font-weight: 600; }
+    button:hover { filter: brightness(1.05); }
+    .grid { display: grid; gap: 12px; }
+    @media (min-width: 960px) { .grid-2 { grid-template-columns: 1fr 1fr; } .grid-3 { grid-template-columns: repeat(3, 1fr); } }
+    .pill { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: #111827; border: 1px solid var(--border); gap: 6px; align-items: center; }
+    .pill strong { color: #fff; }
+    .pill.good { border-color: rgba(22,163,74,0.4); }
+    .pill.warn { border-color: rgba(245,158,11,0.4); }
+    .pill.bad  { border-color: rgba(239,68,68,0.4); }
+    ul { margin: 6px 0 0 20px; }
+    .stat-table { width: 100%; border-collapse: collapse; }
+    .stat-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); }
+    .stat-table tr:last-child td { border-bottom: none; }
+    .error { color: var(--bad); font-weight: 600; }
+    .success { color: var(--good); }
+  </style>
+</head>
+<body>
+  <h1>NHL Matchup Tester</h1>
+  <div class="muted">Pick teams and dates, then run analysis. Powered by your local API.</div>
+
+  <div class="card">
+    <div class="row">
+      <label for="home">Home</label>
+      <select id="home"></select>
+      <label for="away">Away</label>
+      <select id="away"></select>
+    </div>
+    <div class="row" style="margin-top: 12px;">
+      <label for="start">Start date</label>
+      <input id="start" type="date" />
+      <label for="end">End date</label>
+      <input id="end" type="date" />
+      <label class="row" style="gap:6px;"><input id="force" type="checkbox" /> Force refresh</label>
+      <button id="go">Analyze Matchup</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin:0;">Today's Games</h3>
+        <div class="muted">Auto-loads today's schedule from ESPN.</div>
+      </div>
+      <button id="refreshToday">Refresh</button>
+    </div>
+    <div id="todayGames" class="grid" style="margin-top:10px; gap:10px;"></div>
+  </div>
+
+  <div id="summary" class="card" style="display:none;"></div>
+  <div class="grid grid-2">
+    <div id="reasons" class="card" style="display:none;"></div>
+    <div id="ev" class="card" style="display:none;"></div>
+  </div>
+  <div id="teams" class="grid grid-2"></div>
+  <div id="raw" class="card" style="display:none;">
+    <h3>Raw JSON</h3>
+    <pre id="out">{ }</pre>
+  </div>
+
+  <script>
+    const homeSel = document.getElementById('home');
+    const awaySel = document.getElementById('away');
+    const startInp = document.getElementById('start');
+    const endInp = document.getElementById('end');
+    const forceChk = document.getElementById('force');
+    const out = document.getElementById('out');
+    const summaryEl = document.getElementById('summary');
+    const reasonsEl = document.getElementById('reasons');
+    const evEl = document.getElementById('ev');
+    const teamsEl = document.getElementById('teams');
+    const rawEl = document.getElementById('raw');
+    const todayGamesEl = document.getElementById('todayGames');
+    const refreshTodayBtn = document.getElementById('refreshToday');
+
+    async function loadTeams() {
+      try {
+        const res = await fetch('/teams');
+        const data = await res.json();
+        (data.teams || []).forEach(code => {
+          const opt1 = document.createElement('option');
+          opt1.value = code; opt1.textContent = code;
+          const opt2 = opt1.cloneNode(true);
+          homeSel.appendChild(opt1);
+          awaySel.appendChild(opt2);
+        });
+        // Preselect something
+        if (homeSel.options.length > 1) {
+          homeSel.value = homeSel.options[0].value;
+          awaySel.value = homeSel.options[1].value;
+        }
+      } catch (err) {
+        out.textContent = 'Error loading teams: ' + err;
+      }
+    }
+
+    function fmt(num, digits = 2) {
+      if (num === null || num === undefined || Number.isNaN(num)) return '-';
+      return Number(num).toFixed(digits).replace(/\.00$/, '');
+    }
+
+    function renderSummary(data) {
+      const { params, side } = data;
+      const headline = `${params.away} @ ${params.home}`;
+      summaryEl.innerHTML = `
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <div>
+            <h3 style="margin:0;">${headline}</h3>
+            <div class="muted">${params.start_date} to ${params.end_date} ${params.force_refresh ? '(fresh)' : ''}</div>
+          </div>
+          <div class="pill warn"><strong>Lean:</strong> ${side.lean}</div>
+        </div>
+        <div style="margin-top:12px;" class="row">
+          <div class="pill"><strong>${params.home}</strong> score ${fmt(side.home_score)}</div>
+          <div class="pill"><strong>${params.away}</strong> score ${fmt(side.away_score)}</div>
+        </div>
+      `;
+      summaryEl.style.display = 'block';
+    }
+
+    function renderReasons(side) {
+      const homeList = (side.reasons.home_reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No strong reasons</li>';
+      const awayList = (side.reasons.away_reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No strong reasons</li>';
+      reasonsEl.innerHTML = `
+        <h3>Reasons</h3>
+        <div class="grid grid-2">
+          <div><strong>Home reasons</strong><ul>${homeList}</ul></div>
+          <div><strong>Away reasons</strong><ul>${awayList}</ul></div>
+        </div>
+      `;
+      reasonsEl.style.display = 'block';
+    }
+
+    function renderEV(ev, params) {
+      if (!ev) { evEl.style.display = 'none'; return; }
+      evEl.innerHTML = `
+        <h3>EV & Odds</h3>
+        <p class="muted">From ESPN odds (if available)</p>
+        <div class="grid grid-2">
+          <div class="pill"><strong>${params.home}</strong> ML ${fmt(ev.odds.home_ml,0)}</div>
+          <div class="pill"><strong>${params.away}</strong> ML ${fmt(ev.odds.away_ml,0)}</div>
+        </div>
+        <table class="stat-table" style="margin-top:10px;">
+          <tr><td>Model prob ${params.home}</td><td>${fmt(ev.model_prob.home*100)}%</td></tr>
+          <tr><td>Model prob ${params.away}</td><td>${fmt(ev.model_prob.away*100)}%</td></tr>
+          <tr><td>Edge ${params.home}</td><td>${fmt(ev.edge_pct.home)}%</td></tr>
+          <tr><td>Edge ${params.away}</td><td>${fmt(ev.edge_pct.away)}%</td></tr>
+          <tr><td>EV (1u) ${params.home}</td><td>${fmt(ev.ev_units.home,3)}u (grade ${ev.grades.home})</td></tr>
+          <tr><td>EV (1u) ${params.away}</td><td>${fmt(ev.ev_units.away,3)}u (grade ${ev.grades.away})</td></tr>
+        </table>
+      `;
+      evEl.style.display = 'block';
+    }
+
+    function renderTeamCard(profile, label) {
+      const streak = profile.streak;
+      return `
+        <div class="card">
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <h3 style="margin:0;">${label}: ${profile.team}</h3>
+            <div class="pill">${streak.length ? `${streak.length}-game ${streak.type === 'W' ? 'win' : 'loss'} streak` : 'No streak'}</div>
+          </div>
+          <table class="stat-table">
+            <tr><td>Full record</td><td>${profile.full.wins}-${profile.full.losses} (${profile.full.games} gp)</td></tr>
+            <tr><td>GF/GA avg</td><td>${fmt(profile.full.avg_for)} / ${fmt(profile.full.avg_against)}</td></tr>
+            <tr><td>Last 5</td><td>${profile.last5.wins}-${profile.last5.losses} | GF/GA ${fmt(profile.last5.avg_for)} / ${fmt(profile.last5.avg_against)}</td></tr>
+            <tr><td>Last 10</td><td>${profile.last10.wins}-${profile.last10.losses} | GF/GA ${fmt(profile.last10.avg_for)} / ${fmt(profile.last10.avg_against)}</td></tr>
+            <tr><td>Home</td><td>${profile.home.wins}-${profile.home.losses} (avg ${fmt(profile.home.avg_for)} / ${fmt(profile.home.avg_against)})</td></tr>
+            <tr><td>Away</td><td>${profile.away.wins}-${profile.away.losses} (avg ${fmt(profile.away.avg_for)} / ${fmt(profile.away.avg_against)})</td></tr>
+            <tr><td>3+ goals last 5</td><td>${profile.high_scoring_last5.count}/${profile.high_scoring_last5.total}</td></tr>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderTeams(profiles) {
+      teamsEl.innerHTML = `
+        ${renderTeamCard(profiles.home, 'Home')}
+        ${renderTeamCard(profiles.away, 'Away')}
+      `;
+    }
+
+    async function loadToday(forceRefresh = false) {
+      todayGamesEl.innerHTML = '<div class="muted">Loading...</div>';
+      const params = forceRefresh ? '?force_refresh=true' : '';
+      try {
+        const res = await fetch('/nhl/today' + params);
+        const body = await res.json();
+        if (!res.ok) {
+          todayGamesEl.innerHTML = `<div class="error">Error: ${body.detail || 'failed to load'}</div>`;
+          return;
+        }
+        const games = body.games || [];
+        if (!games.length) {
+          todayGamesEl.innerHTML = '<div class="muted">No games found for today.</div>';
+          return;
+        }
+        todayGamesEl.innerHTML = games.map((g, idx) => `
+          <div class="card" style="padding:12px; margin:0;">
+            <div class="row" style="justify-content: space-between; align-items: center;">
+              <div><strong>${g.away} @ ${g.home}</strong></div>
+              <button data-home="${g.home}" data-away="${g.away}" class="analyze-btn">Analyze</button>
+            </div>
+          </div>
+        `).join('');
+        // Wire up buttons
+        todayGamesEl.querySelectorAll('.analyze-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            homeSel.value = btn.getAttribute('data-home');
+            awaySel.value = btn.getAttribute('data-away');
+            analyze();
+          });
+        });
+      } catch (err) {
+        todayGamesEl.innerHTML = `<div class="error">Error: ${err}</div>`;
+      }
+    }
+
+    async function analyze() {
+      const params = new URLSearchParams();
+      params.set('home', homeSel.value);
+      params.set('away', awaySel.value);
+      if (startInp.value) params.set('start_date', startInp.value);
+      if (endInp.value) params.set('end_date', endInp.value);
+      if (forceChk.checked) params.set('force_refresh', 'true');
+      summaryEl.style.display = 'none';
+      reasonsEl.style.display = 'none';
+      evEl.style.display = 'none';
+      teamsEl.innerHTML = '';
+      rawEl.style.display = 'block';
+      out.textContent = 'Loading...';
+      try {
+        const res = await fetch('/nhl/matchup?' + params.toString());
+        const body = await res.json();
+        if (!res.ok) {
+          out.textContent = 'Error: ' + (body.detail || 'Request failed');
+          summaryEl.style.display = 'none';
+          reasonsEl.style.display = 'none';
+          evEl.style.display = 'none';
+          teamsEl.innerHTML = '';
+          return;
+        }
+        out.textContent = JSON.stringify(body, null, 2);
+        renderSummary(body);
+        renderReasons(body.side);
+        renderEV(body.ev, body.params);
+        renderTeams(body.profiles);
+      } catch (err) {
+        out.textContent = 'Error: ' + err;
+      }
+    }
+
+    document.getElementById('go').addEventListener('click', analyze);
+    refreshTodayBtn.addEventListener('click', loadToday);
+    loadTeams();
+    loadToday();
+  </script>
+</body>
+</html>
