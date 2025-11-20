@@ -96,6 +96,52 @@ def test_today_schedule():
     assert games[0]["odds"]["home_ml"] == -120
 
 
+def test_pick_endpoint_with_candidate():
+    schedule = [{"home_team": "BOS", "away_team": "TOR"}]
+    reasons = {"home_reasons": ["solid"], "away_reasons": []}
+    ev_block = {
+        "odds": {"home_ml": -120, "away_ml": 110},
+        "model_prob": {"home": 0.55, "away": 0.45},
+        "market_prob": {"home": 0.52, "away": 0.48},
+        "edge_pct": {"home": 3.0, "away": -3.0},
+        "ev_units": {"home": 0.05, "away": -0.05},
+        "grades": {"home": "B", "away": "D"},
+    }
+    with patch("api.load_schedule_for_date", return_value=schedule), patch(
+        "api.load_games_from_espn_date_range", return_value=sample_games()
+    ), patch("api._lean_scores", return_value=(1.0, 0.5, reasons)), patch(
+        "api._ev_block", return_value=ev_block
+    ):
+        resp = client.get("/nhl/pick")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pick"] is not None
+    assert body["pick"]["side"] == "BOS"
+
+
+def test_pick_endpoint_no_candidate():
+    schedule = [{"home_team": "BOS", "away_team": "TOR"}]
+    reasons = {"home_reasons": [], "away_reasons": []}
+    ev_block = {
+        "odds": {"home_ml": -120, "away_ml": 110},
+        "model_prob": {"home": 0.51, "away": 0.49},
+        "market_prob": {"home": 0.50, "away": 0.50},
+        "edge_pct": {"home": 1.0, "away": -1.0},
+        "ev_units": {"home": 0.01, "away": -0.01},
+        "grades": {"home": "C", "away": "D"},
+    }
+    with patch("api.load_schedule_for_date", return_value=schedule), patch(
+        "api.load_games_from_espn_date_range", return_value=sample_games()
+    ), patch("api._lean_scores", return_value=(1.0, 0.5, reasons)), patch(
+        "api._ev_block", return_value=ev_block
+    ):
+        resp = client.get("/nhl/pick")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pick"] is None
+    assert "No qualifying pick" in body["reason"]
+
+
 def test_sports_endpoint():
     resp = client.get("/sports")
     assert resp.status_code == 200

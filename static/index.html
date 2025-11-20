@@ -62,8 +62,11 @@
       <label class="row" style="gap:6px;"><input id="force" type="checkbox" /> Force refresh</label>
       <button id="go">Analyze Matchup</button>
       <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
+      <button id="pickBtn" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Pick of the Day</button>
     </div>
   </div>
+
+  <div id="pickCard" class="card" style="display:none;"></div>
 
   <div class="card">
     <div class="row" style="justify-content: space-between; align-items: center;">
@@ -102,6 +105,8 @@
     const todayGamesEl = document.getElementById('todayGames');
     const refreshTodayBtn = document.getElementById('refreshToday');
     const goTeamBtn = document.getElementById('goTeam');
+    const pickBtn = document.getElementById('pickBtn');
+    const pickCard = document.getElementById('pickCard');
 
     async function loadTeams() {
       try {
@@ -208,6 +213,56 @@
         ${renderTeamCard(profiles.home, 'Home')}
         ${renderTeamCard(profiles.away, 'Away')}
       `;
+    }
+
+    function renderPick(data) {
+      const pick = data.pick;
+      if (!pick) {
+        pickCard.style.display = 'block';
+        pickCard.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <h3 style="margin:0;">Pick of the Day</h3>
+            <div class="pill warn">No pick today</div>
+          </div>
+          <p class="muted" style="margin-top:8px;">${data.reason || 'No qualifying edge met the thresholds.'}</p>
+        `;
+        return;
+      }
+      pickCard.style.display = 'block';
+      pickCard.innerHTML = `
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h3 style="margin:0;">Pick of the Day</h3>
+          <div class="pill good">${pick.side} ML ${fmt(pick.odds,0)} (grade ${pick.grade})</div>
+        </div>
+        <div class="row" style="margin-top:8px; gap:12px;">
+          <div class="pill"><strong>Matchup:</strong> ${pick.matchup.away} @ ${pick.matchup.home}</div>
+          <div class="pill"><strong>Edge:</strong> ${fmt(pick.edge_pct)}%</div>
+          <div class="pill"><strong>EV:</strong> ${fmt(pick.ev_units,3)}u</div>
+          <div class="pill"><strong>Model:</strong> ${fmt(pick.model_prob*100)}%</div>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="muted">Reasons:</div>
+          <ul>${(pick.reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No reasons available</li>'}</ul>
+        </div>
+      `;
+    }
+
+    async function loadPick() {
+      pickCard.style.display = 'block';
+      pickCard.innerHTML = '<div class="muted">Loading pick of the day...</div>';
+      const params = new URLSearchParams();
+      if (forceChk.checked) params.set('force_refresh', 'true');
+      try {
+        const res = await fetch('/nhl/pick?' + params.toString());
+        const body = await res.json();
+        if (!res.ok) {
+          pickCard.innerHTML = `<div class="error">Error: ${body.detail || 'Request failed'}</div>`;
+          return;
+        }
+        renderPick(body);
+      } catch (err) {
+        pickCard.innerHTML = `<div class="error">Error: ${err}</div>`;
+      }
     }
 
     async function analyzeTeam() {
@@ -333,9 +388,11 @@
 
     document.getElementById('go').addEventListener('click', analyze);
     goTeamBtn.addEventListener('click', analyzeTeam);
+    pickBtn.addEventListener('click', loadPick);
     refreshTodayBtn.addEventListener('click', loadToday);
     loadTeams();
     loadToday();
+    loadPick();
   </script>
 </body>
 </html>

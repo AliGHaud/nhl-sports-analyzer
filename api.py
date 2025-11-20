@@ -236,6 +236,48 @@ def _profile_summary(profile):
         "streak": profile["streak"],
     }
 
+# ---------- Pick of the Day helpers ----------
+
+def _pick_candidate_from_ev(home, away, ev, reasons):
+    """Return the best side candidate from an EV block or None."""
+    if ev is None:
+        return None
+
+    best = None
+    for side_key, team in (("home", home), ("away", away)):
+        ev_units = ev["ev_units"][side_key]
+        edge_pct = ev["edge_pct"][side_key]
+        grade = ev["grades"][side_key]
+        model_prob = ev["model_prob"][side_key]
+        market_prob = ev["market_prob"][side_key]
+        odds = ev["odds"][f"{side_key}_ml"]
+
+        # Thresholds for a viable pick
+        if ev_units < 0.03:
+            continue
+        if edge_pct < 2.0:
+            continue
+        if model_prob < 0.52:
+            continue
+        if grade == "No Bet":
+            continue
+
+        candidate = {
+            "matchup": {"home": home, "away": away},
+            "side": team,
+            "side_type": side_key,
+            "odds": odds,
+            "ev_units": ev_units,
+            "edge_pct": edge_pct,
+            "grade": grade,
+            "model_prob": model_prob,
+            "market_prob": market_prob,
+            "reasons": reasons["home_reasons"] if side_key == "home" else reasons["away_reasons"],
+        }
+        if best is None or candidate["ev_units"] > best["ev_units"]:
+            best = candidate
+    return best
+
 
 # ---------- Routes ----------
 
@@ -493,4 +535,81 @@ def nhl_team(
             "force_refresh": force_refresh,
         },
         "profile": _profile_summary(profile),
+    }
+
+
+@app.get("/nhl/pick")
+def nhl_pick(
+    lookback_days: int = Query(
+        60,
+        ge=7,
+        le=200,
+        description="Days of history to use for profiles (min 7, max 200).",
+    ),
+    force_refresh: bool = Query(
+        False,
+        description="If true, bypass cached ESPN responses for this request.",
+    ),
+):
+    today = date.today()
+    start_dt = today - timedelta(days=lookback_days)
+    start_str = start_dt.isoformat()
+    end_str = today.isoformat()
+
+    schedule = load_schedule_for_date(end_str, force_refresh=force_refresh)
+    if not schedule:
+        return {
+            "date": end_str,
+            "pick": None,
+            "reason": "No games scheduled today.",
+            "candidates": [],
+            "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
+        }
+
+    try:
+        games = load_games_from_espn_date_range(
+            start_str, end_str, force_refresh=force_refresh
+        )
+    except Exception as e:
+        logger.exception("Data fetch failed for pick of day %s-%s | %s", start_str, end_str, e)
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {e}")
+
+    if not games:
+        return {
+            "date": end_str,
+            "pick": None,
+            "reason": "No historical games available to build profiles.",
+            "candidates": [],
+            "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
+        }
+
+    candidates = []
+    for g in schedule:
+        home = g["home_team"]
+        away = g["away_team"]
+        try:
+            home_score, away_score, reasons = _lean_scores(home, away, games)
+        except ValueError:
+            continue
+
+        ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
+        candidate = _pick_candidate_from_ev(home, away, ev, reasons)
+        if candidate:
+            candidates.append(candidate)
+
+    if not candidates:
+        return {
+            "date": end_str,
+            "pick": None,
+            "reason": "No qualifying pick met the thresholds.",
+            "candidates": [],
+            "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
+        }
+
+    best = max(candidates, key=lambda c: c["ev_units"])
+    return {
+        "date": end_str,
+        "pick": best,
+        "candidates": candidates,
+        "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
     }
