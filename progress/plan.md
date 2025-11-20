@@ -1,0 +1,45 @@
+# Progress / Plan
+
+## Goal
+Build a production-ready web app that analyzes NHL (first), using real stats/odds to surface leans and a “pick of the day,” with mobile-friendly UI. Make it monetizable (start with ads; add a paid tier for better picks/features/no ads), robust, and hardened against exploits. Future: expand to other sports, richer trends, and a dedicated odds API (paid if needed).
+
+## Implemented
+- FastAPI endpoints: /health, /sports, /teams, /nhl/matchup (profile + lean + EV + reasons), /nhl/team (profile), /nhl/today (schedule + odds), root UI.
+- Analyzer logic: team profiles (full/last5/last10/home/away/high-scoring/streak), balanced lean engine with reasons and total lean, EV vs market (implied probs, edges, confidence grades, pick summary), CLI workflows (today, date range, future schedule mode).
+- Data layer: ESPN scoreboard fetch with caching; date-range loader (completed games only); schedule loader; odds loader for today’s games; cache under data/cache; NHL Stats API stub.
+- UI: dark SPA tester at `/` with matchup analysis, team analysis, today’s games with odds, raw JSON view; mobile-friendly styling; odds shown when present.
+- Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
+- Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
+
+## Decisions
+- Scope now: NHL only; keep ESPN data for games/odds short term.
+- Odds: plan to move to a dedicated odds API when ready (paid ok).
+- Picks: add “pick of the day.”
+- Trends: include home/away, last-N form, pace/possession, injuries, rest/back-to-back; add more per sport later.
+- UX: must be mobile-friendly; include today’s board, matchup detail, team page, trends; keep logs/persistence.
+- Monetization: lean toward ads first; paid tier for better picks/features/no ads. Requires user accounts/auth to gate features.
+- Security: emphasize input validation, rate limiting (protect APIs from abusive traffic), logging/monitoring, and WAF/CDN shielding.
+
+## Next Actions
+1) Pick-of-day logic: implement a daily selector using confidence grade + EV thresholds (see Recommendations below) and expose it via API and UI card.
+2) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
+3) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
+4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport).
+5) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
+6) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
+7) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
+8) Deploy: move to paid Render to avoid autosleep once ready.
+
+## Recommendations (for pick-of-day thresholds)
+- Only consider sides with EV > +0.02 to +0.03 units and edge >= +2% vs market.
+- Require model win prob >= 52–53% unless longshot logic is explicit.
+- Prefer grades B/B+ and above; allow C+ only if edge >= 5% and EV >= 0.05u.
+- Break ties by higher EV, then higher model prob, then smaller juice.
+- If no candidate meets criteria: return “no pick today” explicitly.
+- Use a freshness window (e.g., odds timestamp <= 15 minutes) before surfacing a pick.
+
+## Nice-to-haves (UI/UX)
+- “Today’s board” tab with compact cards: odds, model prob, edge, grade badge, and a tap-to-expand for reasons.
+- “Pick of the day” featured card at top if available; otherwise a “no pick” state.
+- Team search and recent teams shortcuts.
+- Mobile: single-column stack, sticky action buttons, hide raw JSON behind a toggle.
