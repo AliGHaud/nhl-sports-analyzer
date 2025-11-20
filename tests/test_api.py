@@ -85,12 +85,15 @@ def test_today_schedule():
         {"home_team": "BOS", "away_team": "TOR"},
         {"home_team": "NYR", "away_team": "MTL"},
     ]
-    with patch("api.load_schedule_for_date", return_value=fake_schedule):
+    with patch("api.load_schedule_for_date", return_value=fake_schedule), patch(
+        "api.load_current_odds_for_matchup", return_value={"home_ml": -120, "away_ml": 110}
+    ):
         resp = client.get("/nhl/today")
     assert resp.status_code == 200
     games = resp.json()["games"]
     assert len(games) == 2
     assert games[0]["home"] == "BOS"
+    assert games[0]["odds"]["home_ml"] == -120
 
 
 def test_sports_endpoint():

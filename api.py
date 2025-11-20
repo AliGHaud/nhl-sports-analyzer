@@ -276,16 +276,28 @@ def nhl_today(force_refresh: bool = Query(False)):
     """Return today's NHL schedule (home/away abbreviations)."""
     today = date.today().isoformat()
     schedule = load_schedule_for_date(today, force_refresh=force_refresh)
+    enriched = []
+    for g in schedule:
+        odds = load_current_odds_for_matchup(
+            g["home_team"], g["away_team"], force_refresh=force_refresh
+        )
+        enriched.append(
+            {
+                "home_team": g["home_team"],
+                "away_team": g["away_team"],
+                "odds": odds,
+            }
+        )
     logger.info(
         "[TODAY] Games: %s (force_refresh=%s)",
-        len(schedule),
+        len(enriched),
         force_refresh,
     )
     return {
         "date": today,
         "games": [
-            {"home": g["home_team"], "away": g["away_team"]}
-            for g in schedule
+            {"home": g["home_team"], "away": g["away_team"], "odds": g["odds"]}
+            for g in enriched
         ],
         "force_refresh": force_refresh,
     }

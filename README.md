@@ -34,7 +34,7 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
 - Make sure your host allows outbound HTTP calls to ESPN (no extra credentials needed).
 
 ## Next steps (suggested)
-- Add logging/metrics shipping (now basic logging exists).
+- Add metrics/log shipping (basic logging exists).
 - Add input validation and clearer error messages.
-- Expand tests with FastAPI TestClient and mocked ESPN responses.
+- Expand tests with FastAPI TestClient and mocked ESPN responses (baseline in place).
 - Add a public-facing front-end and auth/paywall when ready.

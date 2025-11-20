@@ -61,6 +61,7 @@
       <input id="end" type="date" />
       <label class="row" style="gap:6px;"><input id="force" type="checkbox" /> Force refresh</label>
       <button id="go">Analyze Matchup</button>
+      <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
     </div>
   </div>
 
@@ -100,6 +101,7 @@
     const rawEl = document.getElementById('raw');
     const todayGamesEl = document.getElementById('todayGames');
     const refreshTodayBtn = document.getElementById('refreshToday');
+    const goTeamBtn = document.getElementById('goTeam');
 
     async function loadTeams() {
       try {
@@ -208,6 +210,54 @@
       `;
     }
 
+    async function analyzeTeam() {
+      const params = new URLSearchParams();
+      params.set('team', homeSel.value);
+      if (startInp.value) params.set('start_date', startInp.value);
+      if (endInp.value) params.set('end_date', endInp.value);
+      if (forceChk.checked) params.set('force_refresh', 'true');
+
+      summaryEl.style.display = 'none';
+      reasonsEl.style.display = 'none';
+      evEl.style.display = 'none';
+      teamsEl.innerHTML = '';
+      rawEl.style.display = 'block';
+      out.textContent = 'Loading...';
+
+      try {
+        const res = await fetch('/nhl/team?' + params.toString());
+        const body = await res.json();
+        if (!res.ok) {
+          out.textContent = 'Error: ' + (body.detail || 'Request failed');
+          summaryEl.style.display = 'none';
+          reasonsEl.style.display = 'none';
+          evEl.style.display = 'none';
+          teamsEl.innerHTML = '';
+          return;
+        }
+        out.textContent = JSON.stringify(body, null, 2);
+        const profile = body.profile;
+        summaryEl.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div>
+              <h3 style="margin:0;">Team: ${profile.team}</h3>
+              <div class="muted">${body.params.start_date} to ${body.params.end_date} ${body.params.force_refresh ? '(fresh)' : ''}</div>
+            </div>
+            <div class="pill"><strong>Games:</strong> ${profile.full.games}</div>
+          </div>
+        `;
+        summaryEl.style.display = 'block';
+        renderSingleTeam(profile);
+      } catch (err) {
+        out.textContent = 'Error: ' + err;
+      }
+    }
+    function renderSingleTeam(profile) {
+      teamsEl.innerHTML = `
+        ${renderTeamCard(profile, 'Team')}
+      `;
+    }
+
     async function loadToday(forceRefresh = false) {
       todayGamesEl.innerHTML = '<div class="muted">Loading...</div>';
       const params = forceRefresh ? '?force_refresh=true' : '';
@@ -227,6 +277,9 @@
           <div class="card" style="padding:12px; margin:0;">
             <div class="row" style="justify-content: space-between; align-items: center;">
               <div><strong>${g.away} @ ${g.home}</strong></div>
+            </div>
+            <div class="row" style="justify-content: space-between; align-items: center; margin-top:6px;">
+              <div class="muted">${g.odds ? `Odds: ${g.odds.away_ml > 0 ? '+'+g.odds.away_ml : g.odds.away_ml} / ${g.odds.home_ml > 0 ? '+'+g.odds.home_ml : g.odds.home_ml}` : 'Odds unavailable'}</div>
               <button data-home="${g.home}" data-away="${g.away}" class="analyze-btn">Analyze</button>
             </div>
           </div>
@@ -279,6 +332,7 @@
     }
 
     document.getElementById('go').addEventListener('click', analyze);
+    goTeamBtn.addEventListener('click', analyzeTeam);
     refreshTodayBtn.addEventListener('click', loadToday);
     loadTeams();
     loadToday();
