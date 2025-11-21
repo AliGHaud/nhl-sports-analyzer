@@ -27,6 +27,8 @@ from data_sources import (
     write_pick_cache,
     get_probable_goalie,
     get_team_adv_stats,
+    load_nhl_team_stats,
+    load_moneypuck_team_stats,
 )
 from nhl_analyzer import (
     get_team_profile,
@@ -343,6 +345,22 @@ def _profile_summary(profile):
         "streak": profile["streak"],
         "rest": profile.get("rest"),
     }
+
+
+def _team_stats_snapshot(force_refresh: bool = False):
+    nhl_stats = load_nhl_team_stats(force_refresh=force_refresh)
+    adv_stats = load_moneypuck_team_stats(force_refresh=force_refresh)
+    teams = []
+    all_codes = set(nhl_stats.keys()) | set(adv_stats.keys())
+    for code in sorted(all_codes):
+        teams.append(
+            {
+                "team": code,
+                "nhl": nhl_stats.get(code) or {},
+                "adv": adv_stats.get(code) or {},
+            }
+        )
+    return teams
 
 # ---------- Pick of the Day helpers ----------
 
@@ -756,10 +774,10 @@ def nhl_pick(
     best = max(candidates, key=lambda c: c["ev_units"])
     result = {
         "date": end_str,
-        "timezone": APP_TIMEZONE,
-        "pick": best,
-        "candidates": candidates,
-        "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
+    "timezone": APP_TIMEZONE,
+    "pick": best,
+    "candidates": candidates,
+    "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
     }
     if cache:
         try:
@@ -767,3 +785,16 @@ def nhl_pick(
         except Exception:
             pass
     return result
+
+
+@app.get("/nhl/stats")
+def nhl_stats(force_refresh: bool = Query(False, description="Refresh cached stats sources")):
+    """
+    Return merged team stats from NHL API (PP/PK/FO/shots) and MoneyPuck (xG/HDCF/PP/PK).
+    """
+    teams = _team_stats_snapshot(force_refresh=force_refresh)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "force_refresh": force_refresh,
+        "teams": teams,
+    }

@@ -21,6 +21,7 @@ ROSTER_TTL_SECONDS = 1800  # 30 minutes
 PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
 MONEYPUCK_TTL_SECONDS = 21600  # 6 hours
 MONEYPUCK_SEASON = os.getenv("MONEYPUCK_SEASON")  # e.g., "2025"
+NHL_TEAM_STATS_TTL_SECONDS = 21600  # 6 hours
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -627,6 +628,65 @@ def get_team_adv_stats(team_code: str, force_refresh: bool = False) -> Optional[
     """Return advanced stats dict for team if available."""
     stats = load_moneypuck_team_stats(force_refresh=force_refresh)
     return stats.get(_normalize_abbr(team_code))
+
+
+def load_nhl_team_stats(force_refresh: bool = False) -> dict:
+    """
+    Load team stats from the NHL public API (power play, penalty kill, faceoffs, shots).
+    Returns a dict keyed by team abbreviation.
+    """
+    cache_name = "nhl_team_stats.json"
+    cache_path = CACHE_DIR / cache_name
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=NHL_TEAM_STATS_TTL_SECONDS)
+        if cached:
+            return cached
+
+    url = "https://statsapi.web.nhl.com/api/v1/teams?expand=team.stats"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except RequestException:
+        return _read_cache(cache_path, ttl_seconds=None) or {}
+    except Exception:
+        return {}
+
+    result = {}
+    for team in data.get("teams", []):
+        try:
+            abbr = _normalize_abbr(team.get("abbreviation"))
+            stats = team.get("teamStats", [])[0]["splits"][0]["stat"]
+        except Exception:
+            continue
+        if not abbr or not stats:
+            continue
+        result[abbr] = {
+            "pp_pct": _safe_float(stats.get("powerPlayPercentage")),
+            "pk_pct": _safe_float(stats.get("penaltyKillPercentage")),
+            "fo_pct": _safe_float(stats.get("faceOffWinPercentage")),
+            "shots_for": _safe_float(stats.get("shotsPerGame")),
+            "shots_against": _safe_float(stats.get("shotsAllowed")),
+            "wins": _safe_int(stats.get("wins")),
+            "losses": _safe_int(stats.get("losses")),
+        }
+
+    _write_cache(cache_path, result)
+    return result
+
+
+def _safe_float(val):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(val):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
 
 
 # Legacy NHL Stats API bits (network blocked on your side)

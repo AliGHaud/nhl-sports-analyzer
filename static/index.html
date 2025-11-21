@@ -80,6 +80,17 @@
   <div class="card">
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div>
+        <h3 style="margin:0;">League Stats</h3>
+        <div class="muted">NHL team stats (NHL API + MoneyPuck).</div>
+      </div>
+      <button id="refreshStats">Refresh</button>
+    </div>
+    <div id="statsTable" class="muted">Loading...</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
         <h3 style="margin:0;">Today's Games</h3>
         <div id="todayMeta" class="muted">Auto-loads today's schedule.</div>
       </div>
@@ -121,6 +132,8 @@
     const rawEl = document.getElementById('raw');
     const todayGamesEl = document.getElementById('todayGames');
     const todayMeta = document.getElementById('todayMeta');
+    const refreshStatsBtn = document.getElementById('refreshStats');
+    const statsTable = document.getElementById('statsTable');
     const refreshTodayBtn = document.getElementById('refreshToday');
     const goTeamBtn = document.getElementById('goTeam');
     const pickBtn = document.getElementById('pickBtn');
@@ -434,6 +447,57 @@
     loadTeams();
     loadToday();
     loadPick();
+    loadStats();
   </script>
 </body>
 </html>
+    async function loadStats(forceRefresh = false) {
+      statsTable.innerHTML = '<div class="skeleton" style="height:40px;"></div>';
+      const params = forceRefresh ? '?force_refresh=true' : '';
+      try {
+        const res = await fetch('/nhl/stats' + params);
+        const body = await res.json();
+        if (!res.ok) {
+          statsTable.innerHTML = `<div class="error">Error: ${body.detail || 'failed to load stats'}</div>`;
+          return;
+        }
+        const rows = body.teams || [];
+        if (!rows.length) {
+          statsTable.innerHTML = '<div class="muted">No stats available.</div>';
+          return;
+        }
+        const header = `
+          <div class="row" style="gap:8px; font-weight:600; border-bottom:1px solid var(--border); padding-bottom:6px;">
+            <div style="width:60px;">Team</div>
+            <div style="width:90px;">xG%</div>
+            <div style="width:90px;">HD%</div>
+            <div style="width:90px;">PP%</div>
+            <div style="width:90px;">PK%</div>
+            <div style="width:90px;">FO%</div>
+            <div style="width:90px;">S/G</div>
+            <div style="width:90px;">SA/G</div>
+          </div>
+        `;
+        const bodyHtml = rows.map((r) => {
+          const adv = r.adv || {};
+          const nhl = r.nhl || {};
+          return `
+            <div class="row" style="gap:8px; padding:4px 0; border-bottom:1px solid var(--border);">
+              <div style="width:60px;">${r.team}</div>
+              <div style="width:90px;">${fmt(adv.xgf_pct)}</div>
+              <div style="width:90px;">${fmt(adv.hdf_pct)}</div>
+              <div style="width:90px;">${adv.pp ? fmt(adv.pp) : fmt(nhl.pp_pct)}</div>
+              <div style="width:90px;">${adv.pk ? fmt(adv.pk) : fmt(nhl.pk_pct)}</div>
+              <div style="width:90px;">${fmt(nhl.fo_pct)}</div>
+              <div style="width:90px;">${fmt(nhl.shots_for)}</div>
+              <div style="width:90px;">${fmt(nhl.shots_against)}</div>
+            </div>
+          `;
+        }).join('');
+        statsTable.innerHTML = header + bodyHtml;
+      } catch (err) {
+        statsTable.innerHTML = `<div class="error">Error: ${err}</div>`;
+      }
+    }
+
+    refreshStatsBtn.addEventListener('click', () => loadStats(true));
