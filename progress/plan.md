@@ -15,6 +15,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.
+- UI: modal popup for Today’s “Analyze” that shows matchup summary/reasons/EV/teams; Today and modal calls default to force_refresh for fresher data.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
 - Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
 
