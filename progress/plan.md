@@ -28,13 +28,18 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 1) Pick-of-day logic: implement a daily selector using confidence grade + EV thresholds (see Recommendations below) and expose it via API and UI card.
 2) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
 3) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
-4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport).
+4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights. Defer injuries/line-history until a paid/reliable feed is chosen.
 5) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
 6) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
 7) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
 8) Deploy: move to paid Render to avoid autosleep once ready.
 9) Docs: keep README in sync (new endpoints/timezone/pick gate) and add UI usage notes.
 
+## Advanced stats roadmap (tiered weighting)
+- Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.
+- Tier 2 (medium): O-zone faceoff%, zone entry/exit success, top D-pair TOI, forecheck vs breakout quality, goalie recent form (last 5).
+- Tier 3 (light/optional): team chemistry/line stability, referee penalty rate, reverse line movement (only with reliable line-history feed).
+- Data requirement: ESPN feed lacks these; need richer stat/injury/odds sources (e.g., xG/HDCF/goalie/injury/line-history APIs). Until sourced, keep missing signals off or very lightly weighted.
 ## Recommendations (for pick-of-day thresholds)
 - Only consider sides with EV > +0.02 to +0.03 units and edge >= +2% vs market.
 - Require model win prob >= 52–53% unless longshot logic is explicit.

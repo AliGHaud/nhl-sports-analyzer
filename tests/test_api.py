@@ -112,7 +112,7 @@ def test_pick_endpoint_with_candidate():
     ), patch("api._lean_scores", return_value=(1.0, 0.5, reasons)), patch(
         "api._ev_block", return_value=ev_block
     ):
-        resp = client.get("/nhl/pick", params={"ignore_pick_gate": "true"})
+        resp = client.get("/nhl/pick", params={"ignore_pick_gate": "true", "cache": "false"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["pick"] is not None
@@ -135,7 +135,7 @@ def test_pick_endpoint_no_candidate():
     ), patch("api._lean_scores", return_value=(1.0, 0.5, reasons)), patch(
         "api._ev_block", return_value=ev_block
     ):
-        resp = client.get("/nhl/pick", params={"ignore_pick_gate": "true"})
+        resp = client.get("/nhl/pick", params={"ignore_pick_gate": "true", "cache": "false"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["pick"] is None
