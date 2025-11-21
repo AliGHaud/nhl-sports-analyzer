@@ -369,7 +369,7 @@
       `;
     }
 
-    async function loadToday(forceRefresh = false) {
+    async function loadToday(forceRefresh = true) {
       todayGamesEl.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
       const params = forceRefresh ? '?force_refresh=true' : '';
       try {
@@ -454,7 +454,7 @@
       const params = new URLSearchParams();
       params.set('home', home);
       params.set('away', away);
-      if (forceChk.checked) params.set('force_refresh', 'true');
+      params.set('force_refresh', 'true');
 
       modalTitle.textContent = `${away} @ ${home}`;
       modalSummary.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
