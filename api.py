@@ -621,14 +621,12 @@ def nhl_pick(
             cached["cached"] = True
             return cached
 
-    if not ignore_pick_gate and now.time() < noon_cutoff:
+    if not ignore_pick_gate and now.time() < pick_gate:
         return {
             "date": end_str,
             "timezone": APP_TIMEZONE,
             "pick": None,
-            "reason": (
-                f"Pick available after {pick_gate.strftime('%I:%M %p')} {APP_TIMEZONE}."
-            ),
+            "reason": f"Pick available after {pick_gate.strftime('%I:%M %p')} {APP_TIMEZONE}.",
             "candidates": [],
             "params": {
                 "lookback_days": lookback_days,
