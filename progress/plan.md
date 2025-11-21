@@ -28,7 +28,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 1) Pick-of-day logic: implement a daily selector using confidence grade + EV thresholds (see Recommendations below) and expose it via API and UI card.
 2) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
 3) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
-4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights. Defer injuries/line-history until a paid/reliable feed is chosen.
+4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
 5) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
 6) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
 7) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.

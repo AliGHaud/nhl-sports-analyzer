@@ -17,6 +17,7 @@ PAST_DAY_CACHE_TTL = None  # unlimited for completed games
 SCHEDULE_TTL_SECONDS = 600  # 10 minutes for schedules/odds snapshots
 ROSTER_TTL_SECONDS = 1800  # 30 minutes
 PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
+MONEYPUCK_TTL_SECONDS = 21600  # 6 hours
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -543,6 +544,60 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional
 
     goalies.sort(key=sort_key, reverse=True)
     return goalies[0]
+
+
+def _current_season_slug() -> str:
+    """Return season slug like 2024-2025 based on today's date."""
+    today = datetime.today()
+    start_year = today.year if today.month >= 8 else today.year - 1
+    end_year = start_year + 1
+    return f"{start_year}-{end_year}"
+
+
+def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
+    """
+    Load MoneyPuck team season summary (xG/HDCF/PP/PK). Returns a dict keyed by team code.
+    """
+    season = _current_season_slug()
+    url = f"https://moneypuck.com/moneypuck/teamData/seasonSummary/{season}/regularTeamSummary.json"
+    data = _fetch_json_cached(
+        url,
+        cache_name=f"moneypuck_team_{season}.json",
+        ttl_seconds=MONEYPUCK_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if not data:
+        return {}
+
+    teams = {}
+    try:
+        rows = data if isinstance(data, list) else data.get("teams", [])
+    except Exception:
+        rows = []
+
+    for row in rows:
+        try:
+            abbr = _normalize_abbr(row.get("teamAbbrev") or row.get("team_abbrev") or row.get("team"))
+        except Exception:
+            continue
+        if not abbr:
+            continue
+        teams[abbr] = {
+            "xgf_pct": row.get("xGoalsPercentage"),
+            "xgf_per60": row.get("xGoalsForPer60"),
+            "xga_per60": row.get("xGoalsAgainstPer60"),
+            "hdf_pct": row.get("highDangerGoalsPercentage") or row.get("highDangerChancesPercentage"),
+            "pp": row.get("powerPlayPercentage") or row.get("powerPlayPct"),
+            "pk": row.get("penaltyKillPercentage") or row.get("penaltyKillPct"),
+        }
+
+    return teams
+
+
+def get_team_adv_stats(team_code: str, force_refresh: bool = False) -> Optional[dict]:
+    """Return advanced stats dict for team if available."""
+    stats = load_moneypuck_team_stats(force_refresh=force_refresh)
+    return stats.get(_normalize_abbr(team_code))
 
 
 # Legacy NHL Stats API bits (network blocked on your side)

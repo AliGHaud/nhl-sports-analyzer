@@ -26,6 +26,7 @@ from data_sources import (
     read_pick_cache,
     write_pick_cache,
     get_probable_goalie,
+    get_team_adv_stats,
 )
 from nhl_analyzer import (
     get_team_profile,
@@ -117,6 +118,8 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
     today = _now_in_zone().date()
     home_profile = get_team_profile(home_team, games, today=today)
     away_profile = get_team_profile(away_team, games, today=today)
+    adv_home = get_team_adv_stats(home_team, force_refresh=force_refresh) or {}
+    adv_away = get_team_adv_stats(away_team, force_refresh=force_refresh) or {}
 
     if home_profile is None or away_profile is None:
         raise ValueError("Not enough data to build team profiles.")
@@ -200,6 +203,47 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
     elif away_ga10 + 0.5 < home_ga10:
         away_score += 1.0
         reasons_away.append("Better defensive numbers (fewer goals against)")
+
+    # Advanced stats edge (xG/HDCF) from MoneyPuck if available
+    xgf_pct_home = adv_home.get("xgf_pct")
+    xgf_pct_away = adv_away.get("xgf_pct")
+    if xgf_pct_home is not None and xgf_pct_away is not None:
+        delta = xgf_pct_home - xgf_pct_away
+        # modest weighting to avoid double counting
+        if delta >= 3.0:
+            home_score += 0.6
+            reasons_home.append("Better xG share (season-to-date)")
+        elif delta <= -3.0:
+            away_score += 0.6
+            reasons_away.append("Better xG share (season-to-date)")
+
+    hdf_home = adv_home.get("hdf_pct")
+    hdf_away = adv_away.get("hdf_pct")
+    if hdf_home is not None and hdf_away is not None:
+        delta = hdf_home - hdf_away
+        if delta >= 3.0:
+            home_score += 0.4
+            reasons_home.append("Better high-danger share")
+        elif delta <= -3.0:
+            away_score += 0.4
+            reasons_away.append("Better high-danger share")
+
+    # Special teams edge (PP/PK) if meaningful
+    pp_home = adv_home.get("pp")
+    pk_home = adv_home.get("pk")
+    pp_away = adv_away.get("pp")
+    pk_away = adv_away.get("pk")
+    if pp_home and pk_home and pp_away and pk_away:
+        # simple net special teams strength
+        net_home = (pp_home or 0) - (100 - (pk_home or 0))
+        net_away = (pp_away or 0) - (100 - (pk_away or 0))
+        delta = net_home - net_away
+        if delta >= 5:
+            home_score += 0.3
+            reasons_home.append("Special teams edge")
+        elif delta <= -5:
+            away_score += 0.3
+            reasons_away.append("Special teams edge")
 
     # Rest / back-to-back
     rest_home = home_profile.get("rest") or {}
