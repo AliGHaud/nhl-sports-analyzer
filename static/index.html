@@ -281,6 +281,7 @@
       pickCard.innerHTML = '<div class="muted">Loading pick of the day...</div>';
       const params = new URLSearchParams();
       if (forceChk.checked) params.set('force_refresh', 'true');
+      // use cache by default (do not set cache=false)
       try {
         const res = await fetch('/nhl/pick?' + params.toString());
         const body = await res.json();

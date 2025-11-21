@@ -23,6 +23,8 @@ from data_sources import (
     load_current_odds_for_matchup,
     load_schedule_for_date,
     TEAM_CODE_TO_ID,
+    read_pick_cache,
+    write_pick_cache,
 )
 from nhl_analyzer import (
     get_team_profile,
@@ -55,6 +57,8 @@ ALIASES = {
 }
 
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/New_York")
+PICK_GATE_HOUR = int(os.getenv("PICK_GATE_HOUR", "12"))
+PICK_GATE_MINUTE = int(os.getenv("PICK_GATE_MINUTE", "0"))
 
 
 # ---------- Helpers ----------
@@ -599,6 +603,10 @@ def nhl_pick(
         False,
         description="If true, skip the noon gating (testing/internal).",
     ),
+    cache: bool = Query(
+        True,
+        description="If true, returns cached pick for the day when available.",
+    ),
 ):
     now = _now_in_zone()
     today = now.date()
@@ -606,13 +614,21 @@ def nhl_pick(
     start_str = start_dt.isoformat()
     end_str = today.isoformat()
 
-    noon_cutoff = time(12, 0)
+    pick_gate = time(PICK_GATE_HOUR, PICK_GATE_MINUTE)
+    if cache and not force_refresh:
+        cached = read_pick_cache(end_str)
+        if cached:
+            cached["cached"] = True
+            return cached
+
     if not ignore_pick_gate and now.time() < noon_cutoff:
         return {
             "date": end_str,
             "timezone": APP_TIMEZONE,
             "pick": None,
-            "reason": f"Pick available after {noon_cutoff.strftime('%I:%M %p')} {APP_TIMEZONE}.",
+            "reason": (
+                f"Pick available after {pick_gate.strftime('%I:%M %p')} {APP_TIMEZONE}."
+            ),
             "candidates": [],
             "params": {
                 "lookback_days": lookback_days,
@@ -675,10 +691,16 @@ def nhl_pick(
         }
 
     best = max(candidates, key=lambda c: c["ev_units"])
-    return {
+    result = {
         "date": end_str,
         "timezone": APP_TIMEZONE,
         "pick": best,
         "candidates": candidates,
         "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
     }
+    if cache:
+        try:
+            write_pick_cache(end_str, result)
+        except Exception:
+            pass
+    return result

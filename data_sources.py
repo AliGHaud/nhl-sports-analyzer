@@ -5,6 +5,7 @@ import csv
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Optional
 
 import requests
 from requests.exceptions import RequestException
@@ -368,6 +369,24 @@ def load_current_odds_for_matchup(home_team, away_team, force_refresh=False):
 
     # If we looked through all events and found no matching game
     return None
+
+
+def read_pick_cache(pick_date: str) -> Optional[dict]:
+    """Read a cached pick for a given date string (YYYY-MM-DD)."""
+    cache_path = CACHE_DIR / f"pick_{pick_date}.json"
+    if not cache_path.exists():
+        return None
+    try:
+        with cache_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def write_pick_cache(pick_date: str, data: dict) -> None:
+    """Write pick cache for a given date string."""
+    cache_path = CACHE_DIR / f"pick_{pick_date}.json"
+    _write_cache(cache_path, data)
 
 
 # Legacy NHL Stats API bits (network blocked on your side)
