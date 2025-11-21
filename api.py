@@ -25,6 +25,7 @@ from data_sources import (
     TEAM_CODE_TO_ID,
     read_pick_cache,
     write_pick_cache,
+    get_probable_goalie,
 )
 from nhl_analyzer import (
     get_team_profile,
@@ -111,7 +112,7 @@ def _now_in_zone():
     return datetime.now(zone)
 
 
-def _lean_scores(home_team: str, away_team: str, games) -> Tuple[float, float, dict]:
+def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = False) -> Tuple[float, float, dict]:
     """Pure version of the lean logic: returns scores + reasons."""
     today = _now_in_zone().date()
     home_profile = get_team_profile(home_team, games, today=today)
@@ -219,6 +220,26 @@ def _lean_scores(home_team: str, away_team: str, games) -> Tuple[float, float, d
         elif diff <= -2:
             away_score += 0.4
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
+
+    # Goalie edge (heuristic)
+    try:
+        home_g = get_probable_goalie(home_team, force_refresh=force_refresh)
+        away_g = get_probable_goalie(away_team, force_refresh=force_refresh)
+    except Exception:
+        home_g = None
+        away_g = None
+
+    if home_g and away_g:
+        home_sv = home_g["stats"].get("save_pct")
+        away_sv = away_g["stats"].get("save_pct")
+        if home_sv is not None and away_sv is not None:
+            delta = home_sv - away_sv
+            if delta >= 0.01:
+                home_score += 0.5
+                reasons_home.append(f"Goalie edge: {home_g['name']} higher sv%")
+            elif delta <= -0.01:
+                away_score += 0.5
+                reasons_away.append(f"Goalie edge: {away_g['name']} higher sv%")
 
     return home_score, away_score, {
         "home_reasons": reasons_home,
@@ -474,7 +495,7 @@ def nhl_matchup(
         )
 
     try:
-        home_score, away_score, reasons = _lean_scores(home, away, games)
+        home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -669,7 +690,7 @@ def nhl_pick(
         home = g["home_team"]
         away = g["away_team"]
         try:
-            home_score, away_score, reasons = _lean_scores(home, away, games)
+            home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
         except ValueError:
             continue
 

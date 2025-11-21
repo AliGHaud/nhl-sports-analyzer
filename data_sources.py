@@ -15,6 +15,8 @@ CACHE_DIR = Path(__file__).parent / "data" / "cache"
 SCOREBOARD_TTL_SECONDS = 300  # 5 minutes for today's scoreboard/odds
 PAST_DAY_CACHE_TTL = None  # unlimited for completed games
 SCHEDULE_TTL_SECONDS = 600  # 10 minutes for schedules/odds snapshots
+ROSTER_TTL_SECONDS = 1800  # 30 minutes
+PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
 
 
 def _read_cache(cache_path, ttl_seconds=None):
@@ -76,6 +78,25 @@ def _fetch_scoreboard_json(
     data = response.json()
     _write_cache(cache_path, data)
     return data
+
+
+def _fetch_json_cached(url, cache_name: str, ttl_seconds: Optional[int] = None, force_refresh: bool = False):
+    cache_path = CACHE_DIR / cache_name
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=ttl_seconds)
+        if cached is not None:
+            return cached
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        _write_cache(cache_path, data)
+        return data
+    except RequestException:
+        return _read_cache(cache_path, ttl_seconds=None)  # stale fallback
+    except Exception:
+        return None
 
 
 def load_games_from_csv(csv_path):
@@ -387,6 +408,125 @@ def write_pick_cache(pick_date: str, data: dict) -> None:
     """Write pick cache for a given date string."""
     cache_path = CACHE_DIR / f"pick_{pick_date}.json"
     _write_cache(cache_path, data)
+
+
+def load_team_roster(team_code: str, force_refresh: bool = False) -> Optional[dict]:
+    """Load roster JSON for a team from ESPN."""
+    team_id = TEAM_CODE_TO_ID.get(team_code)
+    if team_id is None:
+        return None
+    url = f"https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/{team_id}/roster"
+    return _fetch_json_cached(
+        url,
+        cache_name=f"roster_{team_code}.json",
+        ttl_seconds=ROSTER_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+
+
+def load_goalie_stats(athlete_id: str, force_refresh: bool = False) -> Optional[dict]:
+    """Load goalie stats JSON for an athlete from ESPN."""
+    url = f"https://site.web.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/{athlete_id}/stats?region=us&lang=en"
+    return _fetch_json_cached(
+        url,
+        cache_name=f"goalie_{athlete_id}.json",
+        ttl_seconds=PLAYER_STATS_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+
+
+def _parse_goalie_stat_value(stat_obj, key_names):
+    for key in key_names:
+        val = stat_obj.get(key)
+        if val is None:
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _goalie_stats_from_payload(payload) -> dict:
+    """Extract simple goalie stats (save_pct, games_started) from ESPN stats payload."""
+    save_pct = None
+    games_started = None
+    games_played = None
+    gaa = None
+
+    try:
+        stats_list = payload.get("stats", [])
+    except Exception:
+        stats_list = []
+
+    for block in stats_list:
+        try:
+            splits = block.get("splits", [])
+        except Exception:
+            continue
+        for split in splits:
+            stat = split.get("stat", {})
+            save_pct = save_pct or _parse_goalie_stat_value(stat, ["savePct", "savePctAvg"])
+            games_started = games_started or _parse_goalie_stat_value(stat, ["gamesStarted", "gamesStartedAvg"])
+            games_played = games_played or _parse_goalie_stat_value(stat, ["gamesPlayed"])
+            gaa = gaa or _parse_goalie_stat_value(stat, ["goalsAgainstAverage"])
+        if save_pct or games_started:
+            break
+
+    return {
+        "save_pct": save_pct,
+        "games_started": games_started,
+        "games_played": games_played,
+        "gaa": gaa,
+    }
+
+
+def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional[dict]:
+    """
+    Heuristic probable goalie: pick the goalie with most games started; break ties by save_pct.
+    """
+    roster = load_team_roster(team_code, force_refresh=force_refresh)
+    if not roster:
+        return None
+
+    try:
+        athletes = roster.get("athletes", [])
+    except Exception:
+        return None
+
+    goalies = []
+    for group in athletes:
+        try:
+            if group.get("position", {}).get("abbreviation") != "G":
+                continue
+        except Exception:
+            continue
+        for g in group.get("items", []):
+            try:
+                athlete_id = str(g["id"])
+                full_name = g.get("fullName") or g.get("displayName")
+            except Exception:
+                continue
+            stats_payload = load_goalie_stats(athlete_id, force_refresh=force_refresh)
+            stats = _goalie_stats_from_payload(stats_payload) if stats_payload else {}
+            goalies.append(
+                {
+                    "id": athlete_id,
+                    "name": full_name,
+                    "stats": stats,
+                }
+            )
+
+    if not goalies:
+        return None
+
+    def sort_key(g):
+        gs = g["stats"].get("games_started") or 0
+        sv = g["stats"].get("save_pct") or 0
+        return (gs, sv)
+
+    goalies.sort(key=sort_key, reverse=True)
+    return goalies[0]
 
 
 # Legacy NHL Stats API bits (network blocked on your side)
