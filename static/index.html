@@ -50,6 +50,10 @@
     .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.12), rgba(255,255,255,0.05)); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 8px; }
     @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     .toggle { background: none; color: var(--muted); border: 1px solid var(--border); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 999; padding: 12px; }
+    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 16px; box-shadow: 0 18px 40px rgba(0,0,0,0.35); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .modal-close { border: 1px solid var(--border); background: #111827; color: var(--text); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -107,6 +111,22 @@
     </div>
   </div>
 
+  <!-- Modal for matchups triggered from today's board -->
+  <div id="modalBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div id="modalTitle" class="muted">Matchup</div>
+        <button id="modalClose" class="modal-close">Close</button>
+      </div>
+      <div id="modalSummary" class="card" style="margin-top:12px;"></div>
+      <div class="grid grid-2">
+        <div id="modalReasons" class="card" style="display:none;"></div>
+        <div id="modalEv" class="card" style="display:none;"></div>
+      </div>
+      <div id="modalTeams" class="grid grid-2" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
   <script>
     const homeSel = document.getElementById('home');
     const awaySel = document.getElementById('away');
@@ -128,6 +148,13 @@
     const toggleRawBtn = document.getElementById('toggleRaw');
     const rawContainer = document.getElementById('raw');
     const oddsOnlyChk = document.getElementById('oddsOnly');
+    const modalBackdrop = document.getElementById('modalBackdrop');
+    const modalClose = document.getElementById('modalClose');
+    const modalSummary = document.getElementById('modalSummary');
+    const modalReasons = document.getElementById('modalReasons');
+    const modalEv = document.getElementById('modalEv');
+    const modalTeams = document.getElementById('modalTeams');
+    const modalTitle = document.getElementById('modalTitle');
 
     async function loadTeams() {
       try {
@@ -155,10 +182,10 @@
       return Number(num).toFixed(digits).replace(/\.00$/, '');
     }
 
-    function renderSummary(data) {
+    function renderSummary(data, targetEl = summaryEl) {
       const { params, side } = data;
       const headline = `${params.away} @ ${params.home}`;
-      summaryEl.innerHTML = `
+      targetEl.innerHTML = `
         <div class="row" style="justify-content: space-between; align-items: center;">
           <div>
             <h3 style="margin:0;">${headline}</h3>
@@ -171,25 +198,25 @@
           <div class="pill"><strong>${params.away}</strong> score ${fmt(side.away_score)}</div>
         </div>
       `;
-      summaryEl.style.display = 'block';
+      targetEl.style.display = 'block';
     }
 
-    function renderReasons(side) {
+    function renderReasons(side, targetEl = reasonsEl) {
       const homeList = (side.reasons.home_reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No strong reasons</li>';
       const awayList = (side.reasons.away_reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No strong reasons</li>';
-      reasonsEl.innerHTML = `
+      targetEl.innerHTML = `
         <h3>Reasons</h3>
         <div class="grid grid-2">
           <div><strong>Home reasons</strong><ul>${homeList}</ul></div>
           <div><strong>Away reasons</strong><ul>${awayList}</ul></div>
         </div>
       `;
-      reasonsEl.style.display = 'block';
+      targetEl.style.display = 'block';
     }
 
-    function renderEV(ev, params) {
-      if (!ev) { evEl.style.display = 'none'; return; }
-      evEl.innerHTML = `
+    function renderEV(ev, params, targetEl = evEl) {
+      if (!ev) { targetEl.style.display = 'none'; return; }
+      targetEl.innerHTML = `
         <h3>EV & Odds</h3>
         <p class="muted">From ESPN odds (if available)</p>
         <div class="grid grid-2">
@@ -205,7 +232,7 @@
           <tr><td>EV (1u) ${params.away}</td><td>${fmt(ev.ev_units.away,3)}u (grade ${ev.grades.away})</td></tr>
         </table>
       `;
-      evEl.style.display = 'block';
+      targetEl.style.display = 'block';
     }
 
     function renderTeamCard(profile, label) {
@@ -234,8 +261,8 @@
       `;
     }
 
-    function renderTeams(profiles) {
-      teamsEl.innerHTML = `
+    function renderTeams(profiles, targetEl = teamsEl) {
+      targetEl.innerHTML = `
         ${renderTeamCard(profiles.home, 'Home')}
         ${renderTeamCard(profiles.away, 'Away')}
       `;
@@ -378,9 +405,11 @@
         // Wire up buttons
         todayGamesEl.querySelectorAll('.analyze-btn').forEach(btn => {
           btn.addEventListener('click', () => {
-            homeSel.value = btn.getAttribute('data-home');
-            awaySel.value = btn.getAttribute('data-away');
-            analyze();
+            const h = btn.getAttribute('data-home');
+            const a = btn.getAttribute('data-away');
+            homeSel.value = h;
+            awaySel.value = a;
+            analyzeToModal(h, a);
           });
         });
       } catch (err) {
@@ -421,6 +450,35 @@
       }
     }
 
+    async function analyzeToModal(home, away) {
+      const params = new URLSearchParams();
+      params.set('home', home);
+      params.set('away', away);
+      if (forceChk.checked) params.set('force_refresh', 'true');
+
+      modalTitle.textContent = `${away} @ ${home}`;
+      modalSummary.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
+      modalReasons.style.display = 'none';
+      modalEv.style.display = 'none';
+      modalTeams.innerHTML = '';
+      modalBackdrop.style.display = 'flex';
+
+      try {
+        const res = await fetch('/nhl/matchup?' + params.toString());
+        const body = await res.json();
+        if (!res.ok) {
+          modalSummary.innerHTML = `<div class="error">Error: ${body.detail || 'Request failed'}</div>`;
+          return;
+        }
+        renderSummary(body, modalSummary);
+        renderReasons(body.side, modalReasons);
+        renderEV(body.ev, body.params, modalEv);
+        renderTeams(body.profiles, modalTeams);
+      } catch (err) {
+        modalSummary.innerHTML = `<div class="error">Error: ${err}</div>`;
+      }
+    }
+
     document.getElementById('go').addEventListener('click', analyze);
     goTeamBtn.addEventListener('click', analyzeTeam);
     pickBtn.addEventListener('click', loadPick);
@@ -430,6 +488,10 @@
       const open = rawContainer.style.display === 'block';
       rawContainer.style.display = open ? 'none' : 'block';
       toggleRawBtn.textContent = open ? 'Show' : 'Hide';
+    });
+    modalClose.addEventListener('click', () => { modalBackdrop.style.display = 'none'; });
+    modalBackdrop.addEventListener('click', (e) => {
+      if (e.target === modalBackdrop) modalBackdrop.style.display = 'none';
     });
     loadTeams();
     loadToday();
