@@ -8,9 +8,11 @@ Endpoints:
 """
 
 import logging
-from datetime import date, datetime, timedelta
+import os
+from datetime import date, datetime, timedelta, time
 from pathlib import Path
 from typing import Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -52,6 +54,8 @@ ALIASES = {
     "ARI": "UTA",  # legacy Arizona to Utah
 }
 
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/New_York")
+
 
 # ---------- Helpers ----------
 
@@ -88,6 +92,19 @@ def _validate_team_or_400(team: str, label: str) -> str:
             detail=f"{label} '{cleaned}' is not a known NHL team code.",
         )
     return cleaned
+
+
+def _now_in_zone():
+    """Timezone-aware now in the configured app timezone."""
+    try:
+        zone = ZoneInfo(APP_TIMEZONE)
+    except Exception:
+        try:
+            zone = ZoneInfo("UTC")
+        except Exception:
+            # Fall back to naive UTC if tzdata is missing
+            return datetime.utcnow()
+    return datetime.now(zone)
 
 
 def _lean_scores(home_team: str, away_team: str, games) -> Tuple[float, float, dict]:
@@ -316,7 +333,8 @@ def list_teams():
 @app.get("/nhl/today")
 def nhl_today(force_refresh: bool = Query(False)):
     """Return today's NHL schedule (home/away abbreviations)."""
-    today = date.today().isoformat()
+    now = _now_in_zone()
+    today = now.date().isoformat()
     schedule = load_schedule_for_date(today, force_refresh=force_refresh)
     enriched = []
     for g in schedule:
@@ -337,6 +355,7 @@ def nhl_today(force_refresh: bool = Query(False)):
     )
     return {
         "date": today,
+        "timezone": APP_TIMEZONE,
         "games": [
             {"home": g["home_team"], "away": g["away_team"], "odds": g["odds"]}
             for g in enriched
@@ -370,7 +389,8 @@ def nhl_matchup(
     ),
 ):
     # Defaults: last 60 days to keep fetches fast
-    today = date.today()
+    now = _now_in_zone()
+    today = now.date()
     default_start = today - timedelta(days=60)
     start_dt = _parse_date_or_400(start_date, default_start, "start_date")
     end_dt = _parse_date_or_400(end_date, today, "end_date")
@@ -482,7 +502,8 @@ def nhl_team(
         description="If true, bypass cached ESPN responses for this request.",
     ),
 ):
-    today = date.today()
+    now = _now_in_zone()
+    today = now.date()
     default_start = today - timedelta(days=60)
     start_dt = _parse_date_or_400(start_date, default_start, "start_date")
     end_dt = _parse_date_or_400(end_date, today, "end_date")
@@ -550,16 +571,37 @@ def nhl_pick(
         False,
         description="If true, bypass cached ESPN responses for this request.",
     ),
+    ignore_pick_gate: bool = Query(
+        False,
+        description="If true, skip the noon gating (testing/internal).",
+    ),
 ):
-    today = date.today()
+    now = _now_in_zone()
+    today = now.date()
     start_dt = today - timedelta(days=lookback_days)
     start_str = start_dt.isoformat()
     end_str = today.isoformat()
+
+    noon_cutoff = time(12, 0)
+    if not ignore_pick_gate and now.time() < noon_cutoff:
+        return {
+            "date": end_str,
+            "timezone": APP_TIMEZONE,
+            "pick": None,
+            "reason": f"Pick available after {noon_cutoff.strftime('%I:%M %p')} {APP_TIMEZONE}.",
+            "candidates": [],
+            "params": {
+                "lookback_days": lookback_days,
+                "force_refresh": force_refresh,
+                "ignore_pick_gate": ignore_pick_gate,
+            },
+        }
 
     schedule = load_schedule_for_date(end_str, force_refresh=force_refresh)
     if not schedule:
         return {
             "date": end_str,
+            "timezone": APP_TIMEZONE,
             "pick": None,
             "reason": "No games scheduled today.",
             "candidates": [],
@@ -577,6 +619,7 @@ def nhl_pick(
     if not games:
         return {
             "date": end_str,
+            "timezone": APP_TIMEZONE,
             "pick": None,
             "reason": "No historical games available to build profiles.",
             "candidates": [],
@@ -600,6 +643,7 @@ def nhl_pick(
     if not candidates:
         return {
             "date": end_str,
+            "timezone": APP_TIMEZONE,
             "pick": None,
             "reason": "No qualifying pick met the thresholds.",
             "candidates": [],
@@ -609,6 +653,7 @@ def nhl_pick(
     best = max(candidates, key=lambda c: c["ev_units"])
     return {
         "date": end_str,
+        "timezone": APP_TIMEZONE,
         "pick": best,
         "candidates": candidates,
         "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},

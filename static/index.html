@@ -81,7 +81,7 @@
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div>
         <h3 style="margin:0;">Today's Games</h3>
-        <div class="muted">Auto-loads today's schedule from ESPN.</div>
+        <div id="todayMeta" class="muted">Auto-loads today's schedule.</div>
       </div>
       <div class="row" style="gap:8px;">
         <label class="row" style="gap:6px; align-items:center;"><input id="oddsOnly" type="checkbox" /> Odds only</label>
@@ -120,6 +120,7 @@
     const teamsEl = document.getElementById('teams');
     const rawEl = document.getElementById('raw');
     const todayGamesEl = document.getElementById('todayGames');
+    const todayMeta = document.getElementById('todayMeta');
     const refreshTodayBtn = document.getElementById('refreshToday');
     const goTeamBtn = document.getElementById('goTeam');
     const pickBtn = document.getElementById('pickBtn');
@@ -237,6 +238,7 @@
 
     function renderPick(data) {
       const pick = data.pick;
+      const tz = data.timezone || 'Local';
       if (!pick) {
         pickCard.style.display = 'block';
         pickCard.innerHTML = `
@@ -245,6 +247,7 @@
             <div class="pill warn">No pick today</div>
           </div>
           <p class="muted" style="margin-top:8px;">${data.reason || 'No qualifying edge met the thresholds.'}</p>
+          <div class="muted" style="margin-top:6px;">Date ${data.date} (${tz})</div>
         `;
         return;
       }
@@ -264,7 +267,7 @@
           <div class="muted">Reasons:</div>
           <ul>${(pick.reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No reasons available</li>'}</ul>
         </div>
-        <div class="muted" style="margin-top:6px;">Date ${data.date}${data.params?.force_refresh ? ' (fresh)' : ''}</div>
+        <div class="muted" style="margin-top:6px;">Date ${data.date} (${tz})${data.params?.force_refresh ? ' (fresh)' : ''}</div>
       `;
     }
 
@@ -343,6 +346,8 @@
           todayGamesEl.innerHTML = `<div class="error">Error: ${body.detail || 'failed to load'}</div>`;
           return;
         }
+        const tz = body.timezone || 'Local';
+        todayMeta.textContent = `Games for ${body.date} (${tz})${body.force_refresh ? ' (fresh)' : ''}`;
         const games = body.games || [];
         if (!games.length) {
           todayGamesEl.innerHTML = '<div class="muted">No games found for today.</div>';
