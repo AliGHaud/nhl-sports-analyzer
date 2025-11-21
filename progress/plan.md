@@ -8,6 +8,8 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Analyzer logic: team profiles (full/last5/last10/home/away/high-scoring/streak), balanced lean engine with reasons and total lean, EV vs market (implied probs, edges, confidence grades, pick summary), CLI workflows (today, date range, future schedule mode).
 - Data layer: ESPN scoreboard fetch with caching; date-range loader (completed games only); schedule loader; odds loader for today’s games; cache under data/cache; NHL Stats API stub.
 - UI: dark SPA tester at `/` with matchup analysis, team analysis, today’s games with odds, raw JSON view; mobile-friendly styling; odds shown when present.
+- Pick of the Day: API endpoint with EV/edge/model thresholds, noon gate in app timezone; UI card with date/tz and no-pick/early gate states.
+- Timezone-aware “today”: uses configurable `APP_TIMEZONE` (default America/New_York) for schedules/pick; includes timezone in responses/UI; tzdata added for Windows.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
 - Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
 
@@ -29,6 +31,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 6) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
 7) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
 8) Deploy: move to paid Render to avoid autosleep once ready.
+9) Docs: keep README in sync (new endpoints/timezone/pick gate) and add UI usage notes.
 
 ## Recommendations (for pick-of-day thresholds)
 - Only consider sides with EV > +0.02 to +0.03 units and edge >= +2% vs market.

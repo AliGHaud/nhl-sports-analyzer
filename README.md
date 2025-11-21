@@ -18,13 +18,17 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
 - `GET /nhl/team?team=BOS[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&force_refresh=true]`
   - Returns a single team profile (full stats for the range, last5/10, home/away splits, streak, high-scoring trend).
 - `GET /nhl/today[?force_refresh=true]`
-  - Returns today's schedule (home/away abbreviations) for quick UI buttons.
+  - Returns today's schedule (home/away abbreviations) for quick UI buttons. Date is computed in `APP_TIMEZONE` (default America/New_York).
+- `GET /nhl/pick[?force_refresh=true]`
+  - Returns the “Pick of the Day” (best qualifying +EV side) or a clear reason if no pick meets thresholds. Pick is gated until 12:00 in `APP_TIMEZONE`.
 - `GET /sports`
   - Lists supported sports and team codes (foundation for multi-sport).
 
 ## Notes
 - Data comes from ESPN's public NHL endpoint; odds may be missing for some games.
 - Caching: responses from ESPN are cached briefly to avoid hammering the API. Use `force_refresh=true` to bypass.
+- Timezone: set `APP_TIMEZONE` (IANA name, e.g. `America/New_York`) to control “today” and the noon pick gate. Install `tzdata` (already in requirements) on Windows.
+- Pick of the Day: API/UI will show “Pick available after noon” until the gate time in `APP_TIMEZONE`.
 - Stop the server with Ctrl+C. Restart via `.\start-api.ps1`.
 
 ## Deploy (Render/Fly or similar)
