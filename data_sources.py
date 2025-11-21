@@ -18,6 +18,16 @@ SCHEDULE_TTL_SECONDS = 600  # 10 minutes for schedules/odds snapshots
 ROSTER_TTL_SECONDS = 1800  # 30 minutes
 PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
 
+# Normalize ESPN abbreviations to our 3-letter set
+ALIAS_MAP = {
+    "ARI": "UTA",
+    "NJ": "NJD",
+    "LA": "LAK",
+    "TB": "TBL",
+    "SJ": "SJS",
+    "LV": "VGK",
+}
+
 
 def _read_cache(cache_path, ttl_seconds=None):
     """
@@ -78,6 +88,11 @@ def _fetch_scoreboard_json(
     data = response.json()
     _write_cache(cache_path, data)
     return data
+
+
+def _normalize_abbr(code: str) -> str:
+    code = (code or "").upper()
+    return ALIAS_MAP.get(code, code)
 
 
 def _fetch_json_cached(url, cache_name: str, ttl_seconds: Optional[int] = None, force_refresh: bool = False):
@@ -164,7 +179,8 @@ def _parse_espn_events(events):
             away_score = str(away.get("score", "0"))
         except KeyError:
             continue  # skip weirdly formatted games
-
+        home_team = _normalize_abbr(home_team)
+        away_team = _normalize_abbr(away_team)
         games.append(
             {
                 "date": game_date,
@@ -299,8 +315,8 @@ def load_schedule_for_date(date_str, force_refresh=False):
             continue
 
         try:
-            home_team = home["team"]["abbreviation"]
-            away_team = away["team"]["abbreviation"]
+            home_team = _normalize_abbr(home["team"]["abbreviation"])
+            away_team = _normalize_abbr(away["team"]["abbreviation"])
         except KeyError:
             continue
 
@@ -356,13 +372,13 @@ def load_current_odds_for_matchup(home_team, away_team, force_refresh=False):
             continue
 
         try:
-            home_abbr = home["team"]["abbreviation"]
-            away_abbr = away["team"]["abbreviation"]
+            home_abbr = _normalize_abbr(home["team"]["abbreviation"])
+            away_abbr = _normalize_abbr(away["team"]["abbreviation"])
         except KeyError:
             continue
 
-        # Match on abbreviations (e.g. TOR, EDM)
-        if home_abbr != home_team or away_abbr != away_team:
+        # Match on abbreviations (normalized)
+        if home_abbr != _normalize_abbr(home_team) or away_abbr != _normalize_abbr(away_team):
             continue
 
         # Try to read the odds block
