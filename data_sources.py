@@ -606,6 +606,12 @@ def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
                     continue
         return None
 
+    def _get_pct(row, keys):
+        val = _get_first(row, keys)
+        if val is None:
+            return None
+        return val * 100 if val <= 1 else val
+
     teams = {}
     reader = csv.DictReader(StringIO(text))
     for row in reader:
@@ -613,12 +619,12 @@ def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
         if not abbr:
             continue
         teams[abbr] = {
-            "xgf_pct": _get_first(row, ["xGoalsPercentage", "xGoalsPct"]),
+            "xgf_pct": _get_pct(row, ["xGoalsPercentage", "xGoalsPct"]),
             "xgf_per60": _get_first(row, ["xGoalsForPer60", "xGoalsPer60"]),
             "xga_per60": _get_first(row, ["xGoalsAgainstPer60"]),
-            "hdf_pct": _get_first(row, ["highDangerGoalsPercentage", "hdGoalsPercentage", "highDangerChancesPercentage"]),
-            "pp": _get_first(row, ["powerPlayPercentage", "ppPct"]),
-            "pk": _get_first(row, ["penaltyKillPercentage", "pkPct"]),
+            "hdf_pct": _get_pct(row, ["highDangerChancesPercentage", "highDangerGoalsPercentage", "hdGoalsPercentage"]),
+            "pp": _get_pct(row, ["powerPlayPercentage", "ppPct"]),
+            "pk": _get_pct(row, ["penaltyKillPercentage", "pkPct"]),
         }
 
     return teams
