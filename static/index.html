@@ -17,19 +17,25 @@
       --bad: #ef4444;
     }
     * { box-sizing: border-box; }
-    body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: radial-gradient(circle at 10% 10%, rgba(79,70,229,0.12) 0, transparent 25%), radial-gradient(circle at 90% 20%, rgba(236,72,153,0.12) 0, transparent 25%), var(--bg); color: var(--text); }
-    h1 { margin: 0 0 4px; letter-spacing: 0.02em; }
+    body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; margin: 0; padding: 16px; background: radial-gradient(circle at 10% 10%, rgba(79,70,229,0.12) 0, transparent 25%), radial-gradient(circle at 90% 20%, rgba(236,72,153,0.12) 0, transparent 25%), var(--bg); color: var(--text); }
+    h1 { margin: 0 0 4px; letter-spacing: 0.02em; font-size: 1.4rem; }
     h3 { margin-top: 0; }
     p { margin: 4px 0; }
     label { font-weight: 600; }
     .muted { color: var(--muted); font-size: 0.9rem; }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 12px 30px rgba(0,0,0,0.2); margin-bottom: 16px; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-    select, input { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: #0b1020; color: var(--text); min-width: 120px; }
-    button { padding: 11px 16px; border: none; border-radius: 8px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; cursor: pointer; font-weight: 600; }
+    select, input { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #0b1020; color: var(--text); min-width: 120px; font-size: 1rem; }
+    button { padding: 12px 16px; border: none; border-radius: 10px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; cursor: pointer; font-weight: 700; }
     button:hover { filter: brightness(1.05); }
     .grid { display: grid; gap: 12px; }
     @media (min-width: 960px) { .grid-2 { grid-template-columns: 1fr 1fr; } .grid-3 { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 768px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+      body { padding: 12px; }
+      .row { gap: 8px; }
+      button, select, input { width: 100%; }
+    }
     .pill { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: #111827; border: 1px solid var(--border); gap: 6px; align-items: center; }
     .pill strong { color: #fff; }
     .pill.good { border-color: rgba(22,163,74,0.4); }
@@ -41,6 +47,9 @@
     .stat-table tr:last-child td { border-bottom: none; }
     .error { color: var(--bad); font-weight: 600; }
     .success { color: var(--good); }
+    .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.12), rgba(255,255,255,0.05)); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 8px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .toggle { background: none; color: var(--muted); border: 1px solid var(--border); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -74,7 +83,10 @@
         <h3 style="margin:0;">Today's Games</h3>
         <div class="muted">Auto-loads today's schedule from ESPN.</div>
       </div>
-      <button id="refreshToday">Refresh</button>
+      <div class="row" style="gap:8px;">
+        <label class="row" style="gap:6px; align-items:center;"><input id="oddsOnly" type="checkbox" /> Odds only</label>
+        <button id="refreshToday">Refresh</button>
+      </div>
     </div>
     <div id="todayGames" class="grid" style="margin-top:10px; gap:10px;"></div>
   </div>
@@ -85,9 +97,14 @@
     <div id="ev" class="card" style="display:none;"></div>
   </div>
   <div id="teams" class="grid grid-2"></div>
-  <div id="raw" class="card" style="display:none;">
-    <h3>Raw JSON</h3>
-    <pre id="out">{ }</pre>
+  <div class="card">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <h3 style="margin:0;">Raw JSON</h3>
+      <button id="toggleRaw" class="toggle">Show</button>
+    </div>
+    <div id="raw" style="display:none; margin-top:8px;">
+      <pre id="out">{ }</pre>
+    </div>
   </div>
 
   <script>
@@ -107,6 +124,9 @@
     const goTeamBtn = document.getElementById('goTeam');
     const pickBtn = document.getElementById('pickBtn');
     const pickCard = document.getElementById('pickCard');
+    const toggleRawBtn = document.getElementById('toggleRaw');
+    const rawContainer = document.getElementById('raw');
+    const oddsOnlyChk = document.getElementById('oddsOnly');
 
     async function loadTeams() {
       try {
@@ -244,6 +264,7 @@
           <div class="muted">Reasons:</div>
           <ul>${(pick.reasons || []).map(r => `<li>${r}</li>`).join('') || '<li>No reasons available</li>'}</ul>
         </div>
+        <div class="muted" style="margin-top:6px;">Date ${data.date}${data.params?.force_refresh ? ' (fresh)' : ''}</div>
       `;
     }
 
@@ -276,7 +297,6 @@
       reasonsEl.style.display = 'none';
       evEl.style.display = 'none';
       teamsEl.innerHTML = '';
-      rawEl.style.display = 'block';
       out.textContent = 'Loading...';
 
       try {
@@ -314,7 +334,7 @@
     }
 
     async function loadToday(forceRefresh = false) {
-      todayGamesEl.innerHTML = '<div class="muted">Loading...</div>';
+      todayGamesEl.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
       const params = forceRefresh ? '?force_refresh=true' : '';
       try {
         const res = await fetch('/nhl/today' + params);
@@ -328,7 +348,12 @@
           todayGamesEl.innerHTML = '<div class="muted">No games found for today.</div>';
           return;
         }
-        todayGamesEl.innerHTML = games.map((g, idx) => `
+        const filtered = oddsOnlyChk.checked ? games.filter(g => g.odds) : games;
+        if (!filtered.length) {
+          todayGamesEl.innerHTML = '<div class="muted">No games match the current filter.</div>';
+          return;
+        }
+        todayGamesEl.innerHTML = filtered.map((g, idx) => `
           <div class="card" style="padding:12px; margin:0;">
             <div class="row" style="justify-content: space-between; align-items: center;">
               <div><strong>${g.away} @ ${g.home}</strong></div>
@@ -363,7 +388,6 @@
       reasonsEl.style.display = 'none';
       evEl.style.display = 'none';
       teamsEl.innerHTML = '';
-      rawEl.style.display = 'block';
       out.textContent = 'Loading...';
       try {
         const res = await fetch('/nhl/matchup?' + params.toString());
@@ -390,6 +414,12 @@
     goTeamBtn.addEventListener('click', analyzeTeam);
     pickBtn.addEventListener('click', loadPick);
     refreshTodayBtn.addEventListener('click', loadToday);
+    oddsOnlyChk.addEventListener('change', () => loadToday());
+    toggleRawBtn.addEventListener('click', () => {
+      const open = rawContainer.style.display === 'block';
+      rawContainer.style.display = open ? 'none' : 'block';
+      toggleRawBtn.textContent = open ? 'Show' : 'Hide';
+    });
     loadTeams();
     loadToday();
     loadPick();
