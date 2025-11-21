@@ -2,6 +2,7 @@
 # Handles all data loading from ESPN (games, odds, schedules) and CSV (legacy).
 
 import csv
+import os
 import json
 from io import StringIO
 from pathlib import Path
