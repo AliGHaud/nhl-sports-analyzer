@@ -612,6 +612,15 @@ def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
             return None
         return val * 100 if val <= 1 else val
 
+    def _ratio_pct(row, num_key, den_key):
+        try:
+            num = float(row.get(num_key, "") or 0)
+            den = float(row.get(den_key, "") or 0)
+        except ValueError:
+            return None
+        total = num + den
+        return (num / total * 100) if total > 0 else None
+
     teams = {}
     reader = csv.DictReader(StringIO(text))
     for row in reader:
@@ -622,7 +631,8 @@ def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
             "xgf_pct": _get_pct(row, ["xGoalsPercentage", "xGoalsPct"]),
             "xgf_per60": _get_first(row, ["xGoalsForPer60", "xGoalsPer60"]),
             "xga_per60": _get_first(row, ["xGoalsAgainstPer60"]),
-            "hdf_pct": _get_pct(row, ["highDangerChancesPercentage", "highDangerGoalsPercentage", "hdGoalsPercentage"]),
+            # high-danger share: for / (for + against)
+            "hdf_pct": _ratio_pct(row, "highDangerShotsFor", "highDangerShotsAgainst"),
             "pp": _get_pct(row, ["powerPlayPercentage", "ppPct"]),
             "pk": _get_pct(row, ["penaltyKillPercentage", "pkPct"]),
         }
