@@ -624,6 +624,9 @@ def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
     teams = {}
     reader = csv.DictReader(StringIO(text))
     for row in reader:
+        # Keep only the all-situations team row
+        if (row.get("position") != "Team Level") or (row.get("situation", "").lower() != "other"):
+            continue
         abbr = _normalize_abbr(row.get("team") or row.get("teamAbbrev") or row.get("team_abbrev"))
         if not abbr:
             continue
