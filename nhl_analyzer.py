@@ -2,7 +2,7 @@
 # Main file for your NHL betting analyzer project.
 
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import math
 
 from data_sources import (
@@ -237,10 +237,32 @@ def get_current_streak(team, team_games):
     return streak_length, streak_type
 
 
-def get_team_profile(team, games):
+def _compute_rest_info(team_games, today=None):
+    """
+    Compute days since last game and a simple back-to-back flag.
+    """
+    if not team_games:
+        return {"days_since_last": None, "is_back_to_back": False}
+
+    today = today or date.today()
+    try:
+        last_date = max(datetime.strptime(g["date"], "%Y-%m-%d").date() for g in team_games)
+    except Exception:
+        return {"days_since_last": None, "is_back_to_back": False}
+
+    days = (today - last_date).days
+    return {
+        "days_since_last": days,
+        "is_back_to_back": days <= 1,
+    }
+
+
+def get_team_profile(team, games, today=None):
     """
     Build a 'profile' for a team that gathers all the key stats we care about
     in one dictionary.
+
+    today: optional date for rest calculations (defaults to date.today()).
     """
     team_games = get_team_games(games, team)
     if not team_games:
@@ -254,6 +276,7 @@ def get_team_profile(team, games):
         team, team_games, n=5, threshold=3
     )
     streak_len, streak_type = get_current_streak(team, team_games)
+    rest_info = _compute_rest_info(team_games, today=today)
 
     return {
         "team": team,
@@ -271,6 +294,7 @@ def get_team_profile(team, games):
             "length": streak_len,
             "type": streak_type,
         },
+        "rest": rest_info,
     }
 
 
@@ -467,8 +491,9 @@ def analyze_matchup_lean(home_team, away_team, games):
     Returns:
     - (home_score, away_score) for EV calculation later.
     """
-    home_profile = get_team_profile(home_team, games)
-    away_profile = get_team_profile(away_team, games)
+    today = date.today()
+    home_profile = get_team_profile(home_team, games, today=today)
+    away_profile = get_team_profile(away_team, games, today=today)
 
     if home_profile is None or away_profile is None:
         print("\n=== Balanced Lean Engine ===")
@@ -563,6 +588,26 @@ def analyze_matchup_lean(home_team, away_team, games):
     elif away_ga10 + 0.5 < home_ga10:
         away_score += 1.0
         reasons_away.append("Better defensive numbers (fewer goals against)")
+
+    # Rest / back-to-back
+    rest_home = home_profile.get("rest") or {}
+    rest_away = away_profile.get("rest") or {}
+    home_days = rest_home.get("days_since_last")
+    away_days = rest_away.get("days_since_last")
+    if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
+        home_score -= 0.5
+        reasons_away.append("Home on back-to-back; away more rested")
+    if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
+        away_score -= 0.5
+        reasons_home.append("Away on back-to-back; home more rested")
+    if home_days is not None and away_days is not None:
+        diff = home_days - away_days
+        if diff >= 2:
+            home_score += 0.4
+            reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
+        elif diff <= -2:
+            away_score += 0.4
+            reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
     # --- Decide side lean ---
     print(f"\nSide score {home_team}: {home_score:.2f}")

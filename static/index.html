@@ -210,6 +210,10 @@
 
     function renderTeamCard(profile, label) {
       const streak = profile.streak;
+      const rest = profile.rest || {};
+      const restText = rest.days_since_last === null || rest.days_since_last === undefined
+        ? '-'
+        : `${rest.days_since_last}d${rest.is_back_to_back ? ' (B2B)' : ''}`;
       return `
         <div class="card">
           <div class="row" style="justify-content: space-between; align-items: center;">
@@ -224,6 +228,7 @@
             <tr><td>Home</td><td>${profile.home.wins}-${profile.home.losses} (avg ${fmt(profile.home.avg_for)} / ${fmt(profile.home.avg_against)})</td></tr>
             <tr><td>Away</td><td>${profile.away.wins}-${profile.away.losses} (avg ${fmt(profile.away.avg_for)} / ${fmt(profile.away.avg_against)})</td></tr>
             <tr><td>3+ goals last 5</td><td>${profile.high_scoring_last5.count}/${profile.high_scoring_last5.total}</td></tr>
+            <tr><td>Rest</td><td>${restText}</td></tr>
           </table>
         </div>
       `;

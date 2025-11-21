@@ -10,6 +10,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - UI: dark SPA tester at `/` with matchup analysis, team analysis, today’s games with odds, raw JSON view; mobile-friendly styling; odds shown when present.
 - Pick of the Day: API endpoint with EV/edge/model thresholds, noon gate in app timezone; UI card with date/tz and no-pick/early gate states.
 - Timezone-aware “today”: uses configurable `APP_TIMEZONE` (default America/New_York) for schedules/pick; includes timezone in responses/UI; tzdata added for Windows.
+- Rest/Back-to-back signals: profiles now include rest days and B2B flag; lean reasons adjust for rest gaps and B2B; UI team cards show rest.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
 - Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
 

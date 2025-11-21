@@ -9,7 +9,7 @@ Endpoints:
 
 import logging
 import os
-from datetime import date, datetime, timedelta, time
+from datetime import date, datetime, timedelta, time, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -103,14 +103,15 @@ def _now_in_zone():
             zone = ZoneInfo("UTC")
         except Exception:
             # Fall back to naive UTC if tzdata is missing
-            return datetime.utcnow()
+            return datetime.now(timezone.utc)
     return datetime.now(zone)
 
 
 def _lean_scores(home_team: str, away_team: str, games) -> Tuple[float, float, dict]:
     """Pure version of the lean logic: returns scores + reasons."""
-    home_profile = get_team_profile(home_team, games)
-    away_profile = get_team_profile(away_team, games)
+    today = _now_in_zone().date()
+    home_profile = get_team_profile(home_team, games, today=today)
+    away_profile = get_team_profile(away_team, games, today=today)
 
     if home_profile is None or away_profile is None:
         raise ValueError("Not enough data to build team profiles.")
@@ -195,6 +196,26 @@ def _lean_scores(home_team: str, away_team: str, games) -> Tuple[float, float, d
         away_score += 1.0
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
+    # Rest / back-to-back
+    rest_home = home_profile.get("rest") or {}
+    rest_away = away_profile.get("rest") or {}
+    home_days = rest_home.get("days_since_last")
+    away_days = rest_away.get("days_since_last")
+    if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
+        home_score -= 0.5
+        reasons_away.append("Home on back-to-back; away more rested")
+    if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
+        away_score -= 0.5
+        reasons_home.append("Away on back-to-back; home more rested")
+    if home_days is not None and away_days is not None:
+        diff = home_days - away_days
+        if diff >= 2:
+            home_score += 0.4
+            reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
+        elif diff <= -2:
+            away_score += 0.4
+            reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
+
     return home_score, away_score, {
         "home_reasons": reasons_home,
         "away_reasons": reasons_away,
@@ -251,6 +272,7 @@ def _profile_summary(profile):
         "away": profile["away"],
         "high_scoring_last5": profile["high_scoring_last5"],
         "streak": profile["streak"],
+        "rest": profile.get("rest"),
     }
 
 # ---------- Pick of the Day helpers ----------
@@ -431,8 +453,9 @@ def nhl_matchup(
     home = _validate_team_or_400(home, "home")
     away = _validate_team_or_400(away, "away")
 
-    home_profile = get_team_profile(home, games)
-    away_profile = get_team_profile(away, games)
+    today = _now_in_zone().date()
+    home_profile = get_team_profile(home, games, today=today)
+    away_profile = get_team_profile(away, games, today=today)
     if home_profile is None or away_profile is None:
         logger.info(
             "[MATCHUP] Insufficient data for %s or %s in range %s-%s",
@@ -541,7 +564,8 @@ def nhl_team(
         )
 
     team = _validate_team_or_400(team, "team")
-    profile = get_team_profile(team, games)
+    today = _now_in_zone().date()
+    profile = get_team_profile(team, games, today=today)
     if profile is None:
         raise HTTPException(
             status_code=400,
