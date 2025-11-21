@@ -3,6 +3,7 @@
 
 import csv
 import json
+from io import StringIO
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -18,6 +19,7 @@ SCHEDULE_TTL_SECONDS = 600  # 10 minutes for schedules/odds snapshots
 ROSTER_TTL_SECONDS = 1800  # 30 minutes
 PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
 MONEYPUCK_TTL_SECONDS = 21600  # 6 hours
+MONEYPUCK_SEASON = os.getenv("MONEYPUCK_SEASON")  # e.g., "2025"
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -111,6 +113,28 @@ def _fetch_json_cached(url, cache_name: str, ttl_seconds: Optional[int] = None, 
         return data
     except RequestException:
         return _read_cache(cache_path, ttl_seconds=None)  # stale fallback
+    except Exception:
+        return None
+
+
+def _fetch_csv_cached(url: str, cache_name: str, ttl_seconds: Optional[int] = None, force_refresh: bool = False) -> Optional[str]:
+    cache_path = CACHE_DIR / cache_name
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=ttl_seconds)
+        if isinstance(cached, str):
+            return cached
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        text = response.text
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(text, encoding="utf-8")
+        return text
+    except RequestException:
+        if cache_path.exists():
+            return cache_path.read_text(encoding="utf-8")
+        return None
     except Exception:
         return None
 
@@ -547,48 +571,52 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional
 
 
 def _current_season_slug() -> str:
-    """Return season slug like 2024-2025 based on today's date."""
+    """Return MoneyPuck season segment (e.g., 2025)."""
+    if MONEYPUCK_SEASON:
+        return MONEYPUCK_SEASON
     today = datetime.today()
-    start_year = today.year if today.month >= 8 else today.year - 1
-    end_year = start_year + 1
-    return f"{start_year}-{end_year}"
+    # MoneyPuck season folders use the END year (e.g., 2025 for 2024-2025).
+    season_year = today.year if today.month >= 8 else today.year
+    return str(season_year)
 
 
 def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
     """
-    Load MoneyPuck team season summary (xG/HDCF/PP/PK). Returns a dict keyed by team code.
+    Load MoneyPuck team season summary (xG/HDCF/PP/PK) from CSV. Returns a dict keyed by team code.
     """
     season = _current_season_slug()
-    url = f"https://moneypuck.com/moneypuck/teamData/seasonSummary/{season}/regularTeamSummary.json"
-    data = _fetch_json_cached(
+    url = f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{season}/regular/teams.csv"
+    text = _fetch_csv_cached(
         url,
-        cache_name=f"moneypuck_team_{season}.json",
+        cache_name=f"moneypuck_team_{season}.csv",
         ttl_seconds=MONEYPUCK_TTL_SECONDS,
         force_refresh=force_refresh,
     )
-    if not data:
+    if not text:
         return {}
 
-    teams = {}
-    try:
-        rows = data if isinstance(data, list) else data.get("teams", [])
-    except Exception:
-        rows = []
+    def _get_first(row, keys):
+        for k in keys:
+            if k in row and row[k] not in ("", None):
+                try:
+                    return float(row[k])
+                except (TypeError, ValueError):
+                    continue
+        return None
 
-    for row in rows:
-        try:
-            abbr = _normalize_abbr(row.get("teamAbbrev") or row.get("team_abbrev") or row.get("team"))
-        except Exception:
-            continue
+    teams = {}
+    reader = csv.DictReader(StringIO(text))
+    for row in reader:
+        abbr = _normalize_abbr(row.get("team") or row.get("teamAbbrev") or row.get("team_abbrev"))
         if not abbr:
             continue
         teams[abbr] = {
-            "xgf_pct": row.get("xGoalsPercentage"),
-            "xgf_per60": row.get("xGoalsForPer60"),
-            "xga_per60": row.get("xGoalsAgainstPer60"),
-            "hdf_pct": row.get("highDangerGoalsPercentage") or row.get("highDangerChancesPercentage"),
-            "pp": row.get("powerPlayPercentage") or row.get("powerPlayPct"),
-            "pk": row.get("penaltyKillPercentage") or row.get("penaltyKillPct"),
+            "xgf_pct": _get_first(row, ["xGoalsPercentage", "xGoalsPct"]),
+            "xgf_per60": _get_first(row, ["xGoalsForPer60", "xGoalsPer60"]),
+            "xga_per60": _get_first(row, ["xGoalsAgainstPer60"]),
+            "hdf_pct": _get_first(row, ["highDangerGoalsPercentage", "hdGoalsPercentage", "highDangerChancesPercentage"]),
+            "pp": _get_first(row, ["powerPlayPercentage", "ppPct"]),
+            "pk": _get_first(row, ["penaltyKillPercentage", "pkPct"]),
         }
 
     return teams
