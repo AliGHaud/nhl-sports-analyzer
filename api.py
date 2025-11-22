@@ -31,6 +31,7 @@ from data_sources import (
     get_team_adv_stats,
     load_nhl_team_stats,
     load_moneypuck_team_stats,
+    load_team_roster,
 )
 from nhl_analyzer import (
     get_team_profile,
