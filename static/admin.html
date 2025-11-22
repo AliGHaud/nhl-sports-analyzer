@@ -153,22 +153,25 @@
       await loadRoster(gTeam.value);
     }
 
+    function applyRoster(sel, team, goaliesOnly = false) {
+      sel.innerHTML = "";
+      (rosters[team] || [])
+        .filter((p) => !goaliesOnly || (p.position || "").toUpperCase() === "G")
+        .forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.name;
+          opt.textContent = `${p.name}${p.position ? " (" + p.position + ")" : ""}`;
+          sel.appendChild(opt);
+        });
+    }
+
     async function loadRoster(team) {
       if (!team) return;
       try {
         const data = await fetchJSON(`/nhl/roster?team=${team}`);
         rosters[team] = data.players || [];
-        const apply = (sel) => {
-          sel.innerHTML = "";
-          (rosters[team] || []).forEach((p) => {
-            const opt = document.createElement("option");
-            opt.value = p.name;
-            opt.textContent = `${p.name}${p.position ? " (" + p.position + ")" : ""}`;
-            sel.appendChild(opt);
-          });
-        };
-        if (team === injTeam.value) apply(injPlayer);
-        if (team === gTeam.value) apply(gGoalie);
+        if (team === injTeam.value) applyRoster(injPlayer, team, false);
+        if (team === gTeam.value) applyRoster(gGoalie, team, true);
       } catch (e) {
         setStatus("Failed to load roster; try again or enter manually.", "danger");
       }
