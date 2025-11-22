@@ -10,6 +10,8 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - UI: dark SPA tester at `/` with matchup analysis, team analysis, today’s games with odds, raw JSON view; mobile-friendly styling; odds shown when present.
 - Pick of the Day: API endpoint with EV/edge/model thresholds, noon gate in app timezone; UI card with date/tz and no-pick/early gate states.
 - Timezone-aware “today”: uses configurable `APP_TIMEZONE` (default America/New_York) for schedules/pick; includes timezone in responses/UI; tzdata added for Windows.
+- Default lookback: analysis/pick windows now default to 45 days (configurable via `DEFAULT_LOOKBACK_DAYS`; was 60) to emphasize recency while keeping enough sample.
+- Lean weighting refresh: single modest recency factor with capped streaks, flat home bonus, reduced home/road split weight, higher xG impact, lower GA weight, HDF removed, higher goalie edge weight, special teams kept modest.
 - Rest/Back-to-back signals: profiles now include rest days and B2B flag; lean reasons adjust for rest gaps and B2B; UI team cards show rest.
 - Pick caching: pick is cached per-day (in data/cache) and gated until configured time (default 12:00 in APP_TIMEZONE), with force_refresh to rerun.
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
@@ -29,15 +31,17 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Security: emphasize input validation, rate limiting (protect APIs from abusive traffic), logging/monitoring, and WAF/CDN shielding.
 
 ## Next Actions
-1) Pick-of-day logic: implement a daily selector using confidence grade + EV thresholds (see Recommendations below) and expose it via API and UI card.
-2) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
-3) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
-4) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
-5) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
-6) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
-7) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
-8) Deploy: move to paid Render to avoid autosleep once ready.
-9) Docs: keep README in sync (new endpoints/timezone/pick gate) and add UI usage notes.
+1) Monitor/tune new lean weights and de-duplication: watch outputs and adjust recency/home/GA/xG/goalie/special-teams balances if needed.
+2) Pick-of-day tuning: monitor 45-day window impact and adjust EV/edge/model thresholds or recency weighting if needed.
+3) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
+4) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
+5) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
+6) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
+7) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
+8) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
+9) Deploy: move to paid Render to avoid autosleep once ready.
+10) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
+11) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals) and add UI usage notes.
 
 ## Advanced stats roadmap (tiered weighting)
 - Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.

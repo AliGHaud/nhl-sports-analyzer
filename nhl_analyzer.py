@@ -511,53 +511,45 @@ def analyze_matchup_lean(home_team, away_team, games):
     reasons_home = []
     reasons_away = []
 
-    # 1) Last 10 record
+    # 1) Last 10 record (single recency factor)
     home_win10 = win_pct(home_profile["last10"])
     away_win10 = win_pct(away_profile["last10"])
 
-    home_score += home_win10 * 2.0
-    away_score += away_win10 * 2.0
+    home_score += home_win10 * 1.0
+    away_score += away_win10 * 1.0
 
     if home_win10 > away_win10 + 0.1:
-        reasons_home.append("Better last 10 record")
+        reasons_home.append("Better recent form (last 10)")
     elif away_win10 > home_win10 + 0.1:
-        reasons_away.append("Better last 10 record")
+        reasons_away.append("Better recent form (last 10)")
 
-    # 2) Last 5 record
-    home_win5 = win_pct(home_profile["last5"])
-    away_win5 = win_pct(away_profile["last5"])
-
-    home_score += home_win5 * 1.0
-    away_score += away_win5 * 1.0
-
-    if home_win5 > away_win5 + 0.1:
-        reasons_home.append("Stronger recent (last 5) form")
-    elif away_win5 > home_win5 + 0.1:
-        reasons_away.append("Stronger recent (last 5) form")
-
-    # 3) Streak factor
+    # 2) Streak factor (light, capped)
     for profile, is_home_flag in ((home_profile, True), (away_profile, False)):
         streak = profile["streak"]
         length = streak["length"]
         stype = streak["type"]
 
         if length > 0 and stype is not None:
-            # Each win in a winning streak adds 0.5, each loss subtracts 0.5
-            delta = 0.5 * length if stype == "W" else -0.5 * length
+            delta_raw = 0.25 * length if stype == "W" else -0.25 * length
+            delta = max(min(delta_raw, 0.75), -0.75)
             if is_home_flag:
                 home_score += delta
-                if stype == "W" and length >= 2:
+                if stype == "W" and length >= 3:
                     reasons_home.append(f"On a {length}-game winning streak")
-                if stype == "L" and length >= 2:
+                if stype == "L" and length >= 3:
                     reasons_home.append(f"On a {length}-game losing streak")
             else:
                 away_score += delta
-                if stype == "W" and length >= 2:
+                if stype == "W" and length >= 3:
                     reasons_away.append(f"On a {length}-game winning streak")
-                if stype == "L" and length >= 2:
+                if stype == "L" and length >= 3:
                     reasons_away.append(f"On a {length}-game losing streak")
 
-    # 4) Home/Road splits
+    # Flat home-ice bonus
+    home_score += 0.75
+    reasons_home.append("Home-ice advantage")
+
+    # 3) Home/Road splits
     home_home = home_profile["home"]  # home team at home
     away_road = away_profile["away"]  # away team on the road
 
@@ -565,28 +557,28 @@ def analyze_matchup_lean(home_team, away_team, games):
     away_road_win_pct = win_pct(away_road)
 
     if home_home["games"] > 0:
-        home_score += home_home_win_pct * 1.2
+        home_score += home_home_win_pct * 0.8
         if home_home_win_pct >= 0.55:
             reasons_home.append("Strong home record")
         elif home_home_win_pct <= 0.45:
             reasons_away.append("Home team weaker at home")
 
     if away_road["games"] > 0:
-        away_score += away_road_win_pct * 1.2
+        away_score += away_road_win_pct * 0.8
         if away_road_win_pct >= 0.55:
             reasons_away.append("Strong road record")
         elif away_road_win_pct <= 0.45:
             reasons_home.append("Away team weaker on the road")
 
-    # 5) Defensive edge (lower GA in last 10)
+    # 5) Defensive edge (lower GA in last 10) with modest weight
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
 
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 1.0
+        home_score += 0.5
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 1.0
+        away_score += 0.5
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
     # Rest / back-to-back

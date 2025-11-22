@@ -14,7 +14,7 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
 ## Endpoints
 - `GET /health` - simple status check.
 - `GET /nhl/matchup?home=BOS&away=TOR[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&force_refresh=true]`
-  - Returns lean scores/reasons, EV (if odds available), and team profiles. Defaults to last 60 days if no dates provided. `force_refresh=true` bypasses cache.
+- Returns lean scores/reasons, EV (if odds available), and team profiles. Defaults to last 45 days if no dates provided. `force_refresh=true` bypasses cache.
 - `GET /nhl/team?team=BOS[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&force_refresh=true]`
   - Returns a single team profile (full stats for the range, last5/10, home/away splits, streak, high-scoring trend).
 - `GET /nhl/today[?force_refresh=true]`
@@ -42,3 +42,11 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
 - Add input validation and clearer error messages.
 - Expand tests with FastAPI TestClient and mocked ESPN responses (baseline in place).
 - Add a public-facing front-end and auth/paywall when ready.
+## Model signals (current weighting)
+- xG share (season-long MoneyPuck) is the cornerstone signal; recent xG trend is a light adjustment.
+- Goalie edge (probable starters) carries a stronger weight; uses ESPN roster/stats and saves% gap.
+- Recency is a single modest factor (last 10), with a capped streak tweak.
+- Home ice: flat bonus, plus smaller home/road split modifier.
+- Defense: modest GA-based nudge; prefer xGA/shot suppression when available.
+- Special teams: small PP/PK net factor; avoid overweighting recent streaks.
+- HDF% is de-emphasized to avoid double counting xG quality.

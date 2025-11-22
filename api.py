@@ -3,7 +3,7 @@
 Endpoints:
 - GET /health
 - GET /nhl/matchup?home=TOR&away=BOS[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD]
-  Fetches recent games (default last 60 days), builds team profiles, runs lean + EV,
+  Fetches recent games (default last 45 days), builds team profiles, runs lean + EV,
   and returns JSON suitable for a front-end.
 """
 
@@ -63,6 +63,7 @@ ALIASES = {
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/New_York")
 PICK_GATE_HOUR = int(os.getenv("PICK_GATE_HOUR", "12"))
 PICK_GATE_MINUTE = int(os.getenv("PICK_GATE_MINUTE", "0"))
+DEFAULT_LOOKBACK_DAYS = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "45"))
 
 
 # ---------- Helpers ----------
@@ -135,45 +136,40 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
     reasons_home = []
     reasons_away = []
 
-    # Last 10 record
+    # Recency: use last 10 record as a single modest factor
     home_win10 = win_pct(home_profile["last10"])
     away_win10 = win_pct(away_profile["last10"])
-    home_score += home_win10 * 2.0
-    away_score += away_win10 * 2.0
+    home_score += home_win10 * 1.0
+    away_score += away_win10 * 1.0
     if home_win10 > away_win10 + 0.1:
-        reasons_home.append("Better last 10 record")
+        reasons_home.append("Better recent form (last 10)")
     elif away_win10 > home_win10 + 0.1:
-        reasons_away.append("Better last 10 record")
+        reasons_away.append("Better recent form (last 10)")
 
-    # Last 5 record
-    home_win5 = win_pct(home_profile["last5"])
-    away_win5 = win_pct(away_profile["last5"])
-    home_score += home_win5 * 1.0
-    away_score += away_win5 * 1.0
-    if home_win5 > away_win5 + 0.1:
-        reasons_home.append("Stronger recent (last 5) form")
-    elif away_win5 > home_win5 + 0.1:
-        reasons_away.append("Stronger recent (last 5) form")
-
-    # Streaks
+    # Streaks: light and capped
     for profile, is_home_flag in ((home_profile, True), (away_profile, False)):
         streak = profile["streak"]
         length = streak["length"]
         stype = streak["type"]
         if length > 0 and stype:
-            delta = 0.5 * length if stype == "W" else -0.5 * length
+            delta_raw = 0.25 * length if stype == "W" else -0.25 * length
+            delta = max(min(delta_raw, 0.75), -0.75)
             if is_home_flag:
                 home_score += delta
-                if stype == "W" and length >= 2:
+                if stype == "W" and length >= 3:
                     reasons_home.append(f"On a {length}-game winning streak")
-                if stype == "L" and length >= 2:
+                if stype == "L" and length >= 3:
                     reasons_home.append(f"On a {length}-game losing streak")
             else:
                 away_score += delta
-                if stype == "W" and length >= 2:
+                if stype == "W" and length >= 3:
                     reasons_away.append(f"On a {length}-game winning streak")
-                if stype == "L" and length >= 2:
+                if stype == "L" and length >= 3:
                     reasons_away.append(f"On a {length}-game losing streak")
+
+    # Flat home-ice bonus
+    home_score += 0.75
+    reasons_home.append("Home-ice advantage")
 
     # Home/Road splits
     def pct(stats):
@@ -184,26 +180,26 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
     home_home_win_pct = pct(home_home)
     away_road_win_pct = pct(away_road)
     if home_home["games"] > 0:
-        home_score += home_home_win_pct * 1.2
+        home_score += home_home_win_pct * 0.8
         if home_home_win_pct >= 0.55:
             reasons_home.append("Strong home record")
         elif home_home_win_pct <= 0.45:
             reasons_away.append("Home team weaker at home")
     if away_road["games"] > 0:
-        away_score += away_road_win_pct * 1.2
+        away_score += away_road_win_pct * 0.8
         if away_road_win_pct >= 0.55:
             reasons_away.append("Strong road record")
         elif away_road_win_pct <= 0.45:
             reasons_home.append("Away team weaker on the road")
 
-    # Defensive edge (lower GA last 10)
+    # Defensive edge (lower GA last 10) with modest weight
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 1.0
+        home_score += 0.5
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 1.0
+        away_score += 0.5
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
     # Advanced stats edge (xG/HDCF) from MoneyPuck if available
@@ -211,24 +207,12 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
     xgf_pct_away = adv_away.get("xgf_pct")
     if xgf_pct_home is not None and xgf_pct_away is not None:
         delta = xgf_pct_home - xgf_pct_away
-        # modest weighting to avoid double counting
         if delta >= 3.0:
-            home_score += 0.6
+            home_score += 1.0
             reasons_home.append("Better xG share (season-to-date)")
         elif delta <= -3.0:
-            away_score += 0.6
+            away_score += 1.0
             reasons_away.append("Better xG share (season-to-date)")
-
-    hdf_home = adv_home.get("hdf_pct")
-    hdf_away = adv_away.get("hdf_pct")
-    if hdf_home is not None and hdf_away is not None:
-        delta = hdf_home - hdf_away
-        if delta >= 3.0:
-            home_score += 0.4
-            reasons_home.append("Better high-danger share")
-        elif delta <= -3.0:
-            away_score += 0.4
-            reasons_away.append("Better high-danger share")
 
     # Special teams edge (PP/PK) if meaningful
     pp_home = adv_home.get("pp")
@@ -281,10 +265,10 @@ def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = Fa
         if home_sv is not None and away_sv is not None:
             delta = home_sv - away_sv
             if delta >= 0.01:
-                home_score += 0.5
+                home_score += 1.2
                 reasons_home.append(f"Goalie edge: {home_g['name']} higher sv%")
             elif delta <= -0.01:
-                away_score += 0.5
+                away_score += 1.2
                 reasons_away.append(f"Goalie edge: {away_g['name']} higher sv%")
 
     return home_score, away_score, {
@@ -487,7 +471,7 @@ def nhl_matchup(
     home: str = Query(..., description="Home team abbreviation, e.g. BOS"),
     away: str = Query(..., description="Away team abbreviation, e.g. TOR"),
     start_date: Optional[str] = Query(
-        None, description="YYYY-MM-DD; defaults to 60 days ago"
+        None, description="YYYY-MM-DD; defaults to 45 days ago"
     ),
     end_date: Optional[str] = Query(
         None, description="YYYY-MM-DD; defaults to today"
@@ -496,11 +480,11 @@ def nhl_matchup(
         False,
         description="If true, bypass cached ESPN responses for this request.",
     ),
-):
-    # Defaults: last 60 days to keep fetches fast
+    ):
+    # Defaults: last 45 days to keep fetches fast and recent
     now = _now_in_zone()
     today = now.date()
-    default_start = today - timedelta(days=60)
+    default_start = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     start_dt = _parse_date_or_400(start_date, default_start, "start_date")
     end_dt = _parse_date_or_400(end_date, today, "end_date")
 
@@ -602,7 +586,7 @@ def nhl_matchup(
 def nhl_team(
     team: str = Query(..., description="Team abbreviation, e.g. BOS"),
     start_date: Optional[str] = Query(
-        None, description="YYYY-MM-DD; defaults to 60 days ago"
+        None, description="YYYY-MM-DD; defaults to 45 days ago"
     ),
     end_date: Optional[str] = Query(
         None, description="YYYY-MM-DD; defaults to today"
@@ -614,7 +598,7 @@ def nhl_team(
 ):
     now = _now_in_zone()
     today = now.date()
-    default_start = today - timedelta(days=60)
+    default_start = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     start_dt = _parse_date_or_400(start_date, default_start, "start_date")
     end_dt = _parse_date_or_400(end_date, today, "end_date")
 
@@ -673,7 +657,7 @@ def nhl_team(
 @app.get("/nhl/pick")
 def nhl_pick(
     lookback_days: int = Query(
-        60,
+        DEFAULT_LOOKBACK_DAYS,
         ge=7,
         le=200,
         description="Days of history to use for profiles (min 7, max 200).",
