@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from data_sources import (
     load_games_from_espn_date_range,
@@ -64,6 +65,8 @@ APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/New_York")
 PICK_GATE_HOUR = int(os.getenv("PICK_GATE_HOUR", "12"))
 PICK_GATE_MINUTE = int(os.getenv("PICK_GATE_MINUTE", "0"))
 DEFAULT_LOOKBACK_DAYS = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "45"))
+API_ADMIN_TOKEN = os.getenv("API_ADMIN_TOKEN")
+MANUAL_OVERRIDES_PATH = CACHE_DIR / "manual_overrides.json"
 
 
 # ---------- Helpers ----------
@@ -114,6 +117,38 @@ def _now_in_zone():
             # Fall back to naive UTC if tzdata is missing
             return datetime.now(timezone.utc)
     return datetime.now(zone)
+
+
+def _read_overrides():
+    if not MANUAL_OVERRIDES_PATH.exists():
+        return {"injuries": [], "goalies": []}
+    try:
+        with MANUAL_OVERRIDES_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"injuries": [], "goalies": []}
+        data.setdefault("injuries", [])
+        data.setdefault("goalies", [])
+        return data
+    except Exception:
+        return {"injuries": [], "goalies": []}
+
+
+def _write_overrides(data: dict):
+    try:
+        MANUAL_OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with MANUAL_OVERRIDES_PATH.open("w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _require_admin(request: Request):
+    if not API_ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Admin token not configured.")
+    token = request.headers.get("x-admin-token") or request.headers.get("X-Admin-Token")
+    if token != API_ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = False) -> Tuple[float, float, dict]:
@@ -346,6 +381,27 @@ def _team_stats_snapshot(force_refresh: bool = False):
         )
     return teams
 
+
+class InjuryEntry(BaseModel):
+    team: str
+    player: str
+    status: Optional[str] = None
+    note: Optional[str] = None
+    probable_goalie: Optional[bool] = None
+    updated_at: Optional[str] = None
+
+
+class GoalieEntry(BaseModel):
+    team: str
+    goalie: str
+    expected_starter: bool = False
+    updated_at: Optional[str] = None
+
+
+class OverridePayload(BaseModel):
+    injuries: list[InjuryEntry] = []
+    goalies: list[GoalieEntry] = []
+
 # ---------- Pick of the Day helpers ----------
 
 def _pick_candidate_from_ev(home, away, ev, reasons):
@@ -464,6 +520,15 @@ def root():
     if index_path.exists():
         return FileResponse(index_path)
     return {"message": "UI not found. Ensure static/index.html exists."}
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_console():
+    """Serve the admin overrides UI."""
+    admin_path = STATIC_DIR / "admin.html"
+    if admin_path.exists():
+        return FileResponse(admin_path)
+    return {"message": "Admin UI not found. Ensure static/admin.html exists."}
 
 
 @app.get("/nhl/matchup")
@@ -782,3 +847,50 @@ def nhl_stats(force_refresh: bool = Query(False, description="Refresh cached sta
         "force_refresh": force_refresh,
         "teams": teams,
     }
+
+
+@app.get("/nhl/roster")
+def nhl_roster(
+    team: str = Query(..., description="Team abbreviation, e.g. BOS"),
+    force_refresh: bool = Query(False, description="Refresh roster cache"),
+):
+    team = _validate_team_or_400(team, "team")
+    roster = load_team_roster(team, force_refresh=force_refresh)
+    if not roster:
+        raise HTTPException(status_code=404, detail="Roster not available for that team.")
+    players = []
+    try:
+        athletes = roster.get("athletes", [])
+    except Exception:
+        athletes = []
+    for group in athletes:
+        try:
+            position = group.get("position", {}).get("abbreviation")
+        except Exception:
+            position = None
+        for item in group.get("items", []):
+            try:
+                name = item.get("fullName") or item.get("displayName")
+            except Exception:
+                name = None
+            if not name:
+                continue
+            players.append({"name": name, "position": position})
+    return {"team": team, "players": players}
+
+
+@app.get("/admin/overrides")
+def get_overrides(request: Request):
+    _require_admin(request)
+    return _read_overrides()
+
+
+@app.post("/admin/overrides")
+def update_overrides(payload: OverridePayload, request: Request):
+    _require_admin(request)
+    data = {
+        "injuries": [entry.dict() for entry in payload.injuries],
+        "goalies": [entry.dict() for entry in payload.goalies],
+    }
+    _write_overrides(data)
+    return {"status": "ok", "overrides": data}

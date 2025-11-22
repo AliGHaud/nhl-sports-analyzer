@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Overrides</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; color: #111; }
+    h1 { margin-bottom: 4px; }
+    .tabs { display: flex; gap: 12px; margin-bottom: 12px; }
+    .tab { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; background: #f3f3f3; }
+    .tab.active { background: #e5e5e5; font-weight: 600; }
+    .panel { display: none; border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+    .panel.active { display: block; }
+    label { display: block; margin-top: 8px; font-weight: 600; }
+    select, input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    button { margin-top: 12px; padding: 10px 14px; border: none; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    .pill { display: inline-block; padding: 4px 8px; margin: 4px 4px 0 0; background: #f1f5f9; border-radius: 12px; }
+    .muted { color: #666; font-size: 0.9em; }
+    .danger { color: #b91c1c; }
+    .success { color: #166534; }
+    .input-inline { display: flex; gap: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+  <h1>Admin Overrides</h1>
+  <div class="muted">Use your admin token in the field below. Changes are saved to the server overrides JSON.</div>
+  <label for="token">Admin Token</label>
+  <input id="token" type="text" placeholder="Enter admin token (required)" />
+
+  <div class="tabs">
+    <div class="tab active" data-tab="injuries">Injuries</div>
+    <div class="tab" data-tab="goalies">Starting Goalies</div>
+  </div>
+
+  <div id="injuries" class="panel active">
+    <div class="row">
+      <div>
+        <label for="inj-team">Team</label>
+        <select id="inj-team"></select>
+      </div>
+      <div>
+        <label for="inj-player">Player</label>
+        <select id="inj-player"></select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="inj-status">Status</label>
+        <select id="inj-status">
+          <option value="Out">Out</option>
+          <option value="Doubtful">Doubtful</option>
+          <option value="IR">IR</option>
+          <option value="LTIR">LTIR</option>
+          <option value="Active">Active</option>
+        </select>
+      </div>
+      <div>
+        <label for="inj-prob-goalie">Probable Goalie?</label>
+        <select id="inj-prob-goalie">
+          <option value="">No</option>
+          <option value="Y">Yes</option>
+        </select>
+      </div>
+    </div>
+    <label for="inj-note">Note</label>
+    <textarea id="inj-note" rows="3" placeholder="Optional note"></textarea>
+    <button id="inj-submit">Add/Update Injury</button>
+    <div id="inj-list"></div>
+  </div>
+
+  <div id="goalies" class="panel">
+    <div class="row">
+      <div>
+        <label for="g-team">Team</label>
+        <select id="g-team"></select>
+      </div>
+      <div>
+        <label for="g-goalie">Goalie</label>
+        <select id="g-goalie"></select>
+      </div>
+    </div>
+    <div class="input-inline">
+      <input type="checkbox" id="g-starter" /> <label for="g-starter">Expected Starter</label>
+    </div>
+    <button id="g-submit">Set Goalie Override</button>
+    <div id="g-list"></div>
+  </div>
+
+  <div id="status" class="muted" style="margin-top:12px;"></div>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab");
+    const panels = document.querySelectorAll(".panel");
+    tabs.forEach((t) => {
+      t.addEventListener("click", () => {
+        tabs.forEach((x) => x.classList.remove("active"));
+        panels.forEach((p) => p.classList.remove("active"));
+        t.classList.add("active");
+        document.getElementById(t.dataset.tab).classList.add("active");
+      });
+    });
+
+    const tokenInput = document.getElementById("token");
+    const injTeam = document.getElementById("inj-team");
+    const injPlayer = document.getElementById("inj-player");
+    const injStatus = document.getElementById("inj-status");
+    const injNote = document.getElementById("inj-note");
+    const injProb = document.getElementById("inj-prob-goalie");
+    const injSubmit = document.getElementById("inj-submit");
+    const injList = document.getElementById("inj-list");
+
+    const gTeam = document.getElementById("g-team");
+    const gGoalie = document.getElementById("g-goalie");
+    const gStarter = document.getElementById("g-starter");
+    const gSubmit = document.getElementById("g-submit");
+    const gList = document.getElementById("g-list");
+
+    const statusEl = document.getElementById("status");
+
+    let overrides = { injuries: [], goalies: [] };
+    let rosters = {};
+    let teams = [];
+
+    function setStatus(msg, cls = "") {
+      statusEl.className = cls || "muted";
+      statusEl.textContent = msg;
+    }
+
+    async function fetchJSON(url, opts = {}) {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    async function loadTeams() {
+      const data = await fetchJSON("/teams");
+      teams = data.teams || [];
+      [injTeam, gTeam].forEach((sel) => {
+        sel.innerHTML = "";
+        teams.forEach((t) => {
+          const opt = document.createElement("option");
+          opt.value = t;
+          opt.textContent = t;
+          sel.appendChild(opt);
+        });
+      });
+      await loadRoster(injTeam.value);
+      await loadRoster(gTeam.value);
+    }
+
+    async function loadRoster(team) {
+      if (!team) return;
+      try {
+        const data = await fetchJSON(`/nhl/roster?team=${team}`);
+        rosters[team] = data.players || [];
+        const apply = (sel) => {
+          sel.innerHTML = "";
+          (rosters[team] || []).forEach((p) => {
+            const opt = document.createElement("option");
+            opt.value = p.name;
+            opt.textContent = `${p.name}${p.position ? " (" + p.position + ")" : ""}`;
+            sel.appendChild(opt);
+          });
+        };
+        if (team === injTeam.value) apply(injPlayer);
+        if (team === gTeam.value) apply(gGoalie);
+      } catch (e) {
+        setStatus("Failed to load roster; try again or enter manually.", "danger");
+      }
+    }
+
+    async function loadOverrides() {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        setStatus("Enter admin token to load overrides.", "danger");
+        return;
+      }
+      try {
+        const data = await fetchJSON("/admin/overrides", {
+          headers: { "x-admin-token": token },
+        });
+        overrides = data || { injuries: [], goalies: [] };
+        renderLists();
+        setStatus("Overrides loaded.", "success");
+      } catch (e) {
+        setStatus("Failed to load overrides (check token).", "danger");
+      }
+    }
+
+    function renderLists() {
+      injList.innerHTML = "";
+      (overrides.injuries || []).forEach((i) => {
+        const div = document.createElement("div");
+        div.className = "pill";
+        div.textContent = `${i.team} - ${i.player} (${i.status || "n/a"}) ${i.note ? "- " + i.note : ""}`;
+        injList.appendChild(div);
+      });
+      gList.innerHTML = "";
+      (overrides.goalies || []).forEach((g) => {
+        const div = document.createElement("div");
+        div.className = "pill";
+        div.textContent = `${g.team} - ${g.goalie} ${g.expected_starter ? "(Starter)" : ""}`;
+        gList.appendChild(div);
+      });
+    }
+
+    async function saveOverrides() {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        setStatus("Enter admin token before saving.", "danger");
+        return;
+      }
+      try {
+        const payload = JSON.stringify(overrides);
+        await fetchJSON("/admin/overrides", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-token": token,
+          },
+          body: payload,
+        });
+        setStatus("Saved.", "success");
+      } catch (e) {
+        setStatus("Save failed (check token).", "danger");
+      }
+    }
+
+    injTeam.addEventListener("change", () => loadRoster(injTeam.value));
+    gTeam.addEventListener("change", () => loadRoster(gTeam.value));
+
+    injSubmit.addEventListener("click", () => {
+      const entry = {
+        team: injTeam.value,
+        player: injPlayer.value,
+        status: injStatus.value,
+        note: injNote.value,
+        probable_goalie: injProb.value === "Y",
+        updated_at: new Date().toISOString(),
+      };
+      overrides.injuries = overrides.injuries.filter(
+        (i) => !(i.team === entry.team && i.player === entry.player)
+      );
+      overrides.injuries.push(entry);
+      renderLists();
+      saveOverrides();
+    });
+
+    gSubmit.addEventListener("click", () => {
+      const entry = {
+        team: gTeam.value,
+        goalie: gGoalie.value,
+        expected_starter: gStarter.checked,
+        updated_at: new Date().toISOString(),
+      };
+      overrides.goalies = overrides.goalies.filter(
+        (g) => !(g.team === entry.team && g.goalie === entry.goalie)
+      );
+      overrides.goalies.push(entry);
+      renderLists();
+      saveOverrides();
+    });
+
+    // Initial load
+    (async () => {
+      await loadTeams();
+      await loadOverrides();
+    })();
+  </script>
+</body>
+</html>

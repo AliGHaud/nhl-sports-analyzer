@@ -17,6 +17,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
 - API-Sports (optional): API-Sports Hockey fixtures/odds via `API_SPORTS_KEY` (league=57), fallback to ESPN when unset/unavailable.
+- Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.
 - UI: modal popup for Today’s “Analyze” that shows matchup summary/reasons/EV/teams; Today and modal calls default to force_refresh for fresher data.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
@@ -57,7 +58,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 12) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
 13) Deploy: move to paid Render to avoid autosleep once ready.
 14) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
-15) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals) and add UI usage notes.
+15) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals/admin console/overrides) and add UI usage notes.
 
 ## Advanced stats roadmap (tiered weighting)
 - Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.
