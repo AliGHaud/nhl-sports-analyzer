@@ -25,11 +25,19 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
   - Lists supported sports and team codes (foundation for multi-sport).
 
 ## Notes
-- Data comes from ESPN's public NHL endpoint; odds may be missing for some games.
-- Caching: responses from ESPN are cached briefly to avoid hammering the API. Use `force_refresh=true` to bypass.
+- Data sources: ESPN public NHL endpoint (games/odds) and MoneyPuck (xG/advanced team stats). Optional: API-Sports Hockey (fixtures/odds) when `API_SPORTS_KEY` is set.
+- Caching: responses from ESPN/API-Sports are cached briefly to avoid hammering the API. Use `force_refresh=true` to bypass.
 - Timezone: set `APP_TIMEZONE` (IANA name, e.g. `America/New_York`) to control “today” and the noon pick gate. Install `tzdata` (already in requirements) on Windows.
 - Pick of the Day: API/UI will show “Pick available after noon” until the gate time in `APP_TIMEZONE`.
-- Stop the server with Ctrl+C. Restart via `.\start-api.ps1`.
+- Stop the server with Ctrl+C. Restart via `.\\start-api.ps1`.
+
+## Configuration
+- `API_SPORTS_KEY` (optional): API-Sports key to pull NHL fixtures/odds (multi-sport capable). Defaults to ESPN-only if unset.
+- `APISPORTS_HOCKEY_LEAGUE` (optional): league id (default `57` for NHL).
+- `APISPORTS_HOCKEY_SEASON` (optional): season string (e.g., `2024` for 2024-2025).
+- `APP_TIMEZONE` (optional): controls “today” and pick gate (default `America/New_York`).
+- `PICK_GATE_HOUR` / `PICK_GATE_MINUTE` (optional): gate pick-of-day until this local time.
+- `DEFAULT_LOOKBACK_DAYS` (optional): history window for profiles/pick (default 45).
 
 ## Deploy (Render/Fly or similar)
 - Ensure `Procfile` is present (this repo includes it): `web: uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}`.

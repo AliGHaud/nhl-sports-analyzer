@@ -16,6 +16,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Pick caching: pick is cached per-day (in data/cache) and gated until configured time (default 12:00 in APP_TIMEZONE), with force_refresh to rerun.
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
+- API-Sports (optional): API-Sports Hockey fixtures/odds via `API_SPORTS_KEY` (league=57), fallback to ESPN when unset/unavailable.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.
 - UI: modal popup for Today’s “Analyze” that shows matchup summary/reasons/EV/teams; Today and modal calls default to force_refresh for fresher data.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
@@ -30,18 +31,33 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Monetization: lean toward ads first; paid tier for better picks/features/no ads. Requires user accounts/auth to gate features.
 - Security: emphasize input validation, rate limiting (protect APIs from abusive traffic), logging/monitoring, and WAF/CDN shielding.
 
+## Model signals, sources, and current weights
+- xG share (MoneyPuck, season-long): cornerstone (~50% influence target). Recent xG trend is a light tweak.
+- Goalie edge (ESPN roster/stats, sv% gap; plan GSAx/long-run SV%): heavier weight (~20–25%).
+- Recency (last 10 W-L) + capped streak: modest (1.0 * win%, streak ±0.25 per game capped at ±0.75).
+- Home: flat +0.75 bonus; home/road split weight trimmed (0.8 * win%).
+- Rest/B2B: situational only (-0.5 B2B, +0.4 for 2+ extra rest days).
+- Defense: GA last 10 with small weight (0.5); plan to swap to xGA/shot suppression.
+- Special teams: small PP/PK net factor (~0.3); season-long, low weight.
+- HDF%: de-emphasized (dropped) to avoid double-counting xG.
+- Data feeds: ESPN (games/odds, fallback), API-Sports Hockey (fixtures/odds when `API_SPORTS_KEY` is set), MoneyPuck (xG/adv), ESPN roster/stats for goalies.
+
 ## Next Actions
 1) Monitor/tune new lean weights and de-duplication: watch outputs and adjust recency/home/GA/xG/goalie/special-teams balances if needed.
 2) Pick-of-day tuning: monitor 45-day window impact and adjust EV/edge/model thresholds or recency weighting if needed.
 3) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
 4) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
-5) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
-6) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
-7) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
-8) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
-9) Deploy: move to paid Render to avoid autosleep once ready.
-10) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
-11) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals) and add UI usage notes.
+5) Goalie metric upgrade: add GSAx/long-run SV% and starter/backup identification; weight goalie gap toward ~20–25% influence.
+6) Defense metric upgrade: replace GA-based nudge with xGA/shot suppression when available; keep weight modest to avoid goalie double-counting.
+7) Special teams refinement: use season-long ST goal differential or PPxG-PKxG (when available) as the small ST factor; keep weight low.
+8) Injury/lineup adjustments: incorporate key player/goalie absences via simple ratings or flags to adjust lean scores.
+9) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
+10) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
+11) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
+12) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
+13) Deploy: move to paid Render to avoid autosleep once ready.
+14) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
+15) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals) and add UI usage notes.
 
 ## Advanced stats roadmap (tiered weighting)
 - Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.

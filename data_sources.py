@@ -22,6 +22,10 @@ PLAYER_STATS_TTL_SECONDS = 1800  # 30 minutes
 MONEYPUCK_TTL_SECONDS = 21600  # 6 hours
 MONEYPUCK_SEASON = os.getenv("MONEYPUCK_SEASON")  # e.g., "2025"
 NHL_TEAM_STATS_TTL_SECONDS = 21600  # 6 hours
+APISPORTS_API_KEY = os.getenv("API_SPORTS_KEY")
+APISPORTS_HOCKEY_LEAGUE = os.getenv("APISPORTS_HOCKEY_LEAGUE", "57")  # NHL league id in API-Sports
+APISPORTS_HOCKEY_SEASON = os.getenv("APISPORTS_HOCKEY_SEASON")  # e.g., "2024" for 2024-2025 season
+APISPORTS_TTL_SECONDS = 600
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -31,6 +35,42 @@ ALIAS_MAP = {
     "TB": "TBL",
     "SJ": "SJS",
     "LV": "VGK",
+}
+
+TEAM_NAME_TO_CODE = {
+    "ANAHEIM DUCKS": "ANA",
+    "ARIZONA COYOTES": "UTA",
+    "UTAH HOCKEY CLUB": "UTA",
+    "BOSTON BRUINS": "BOS",
+    "BUFFALO SABRES": "BUF",
+    "CAROLINA HURRICANES": "CAR",
+    "COLUMBUS BLUE JACKETS": "CBJ",
+    "CALGARY FLAMES": "CGY",
+    "CHICAGO BLACKHAWKS": "CHI",
+    "COLORADO AVALANCHE": "COL",
+    "DALLAS STARS": "DAL",
+    "DETROIT RED WINGS": "DET",
+    "EDMONTON OILERS": "EDM",
+    "FLORIDA PANTHERS": "FLA",
+    "LOS ANGELES KINGS": "LAK",
+    "MINNESOTA WILD": "MIN",
+    "MONTREAL CANADIENS": "MTL",
+    "NEW JERSEY DEVILS": "NJD",
+    "NASHVILLE PREDATORS": "NSH",
+    "NEW YORK ISLANDERS": "NYI",
+    "NEW YORK RANGERS": "NYR",
+    "OTTAWA SENATORS": "OTT",
+    "PHILADELPHIA FLYERS": "PHI",
+    "PITTSBURGH PENGUINS": "PIT",
+    "SEATTLE KRAKEN": "SEA",
+    "SAN JOSE SHARKS": "SJS",
+    "ST. LOUIS BLUES": "STL",
+    "TAMPA BAY LIGHTNING": "TBL",
+    "TORONTO MAPLE LEAFS": "TOR",
+    "VANCOUVER CANUCKS": "VAN",
+    "VEGAS GOLDEN KNIGHTS": "VGK",
+    "WASHINGTON CAPITALS": "WSH",
+    "WINNIPEG JETS": "WPG",
 }
 
 
@@ -111,6 +151,35 @@ def _fetch_json_cached(url, cache_name: str, ttl_seconds: Optional[int] = None, 
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
+        _write_cache(cache_path, data)
+        return data
+    except RequestException:
+        return _read_cache(cache_path, ttl_seconds=None)  # stale fallback
+    except Exception:
+        return None
+
+
+def _apisports_get(path: str, params: dict, cache_name: str, ttl_seconds: Optional[int] = None, force_refresh: bool = False):
+    """
+    Call API-Sports Hockey endpoint with caching. Returns JSON or None.
+    """
+    if not APISPORTS_API_KEY:
+        return None
+
+    base_url = "https://v1.hockey.api-sports.io"
+    cache_path = CACHE_DIR / cache_name
+
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=ttl_seconds)
+        if cached is not None:
+            return cached
+
+    headers = {"x-apisports-key": APISPORTS_API_KEY}
+    url = f"{base_url}{path}"
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
         _write_cache(cache_path, data)
         return data
     except RequestException:
@@ -317,6 +386,12 @@ def load_schedule_for_date(date_str, force_refresh=False):
         ttl_seconds=SCHEDULE_TTL_SECONDS,
         force_refresh=force_refresh,
     )
+    # Try API-Sports first if key is present; fallback to ESPN
+    if APISPORTS_API_KEY:
+        schedule_api = load_schedule_for_date_apisports(date_str, force_refresh=force_refresh)
+        if schedule_api:
+            return schedule_api
+
     if data is None:
         return []
 
@@ -367,6 +442,11 @@ def load_current_odds_for_matchup(home_team, away_team, force_refresh=False):
 
     If not found or odds missing, return None.
     """
+    # Try API-Sports first if configured
+    api_odds = load_current_odds_for_matchup_apisports(home_team, away_team, force_refresh=force_refresh)
+    if api_odds:
+        return api_odds
+
     data = _fetch_scoreboard_json(
         date_param=None,
         ttl_seconds=SCOREBOARD_TTL_SECONDS,
@@ -582,6 +662,17 @@ def _current_season_slug() -> str:
     return str(season_year)
 
 
+def _apisports_hockey_season() -> str:
+    """
+    Return API-Sports hockey season param.
+    API-Sports expects a single year string like '2024' for the 2024-2025 season.
+    """
+    if APISPORTS_HOCKEY_SEASON:
+        return APISPORTS_HOCKEY_SEASON
+    today = datetime.today()
+    return str(today.year if today.month >= 8 else today.year - 1)
+
+
 def load_moneypuck_team_stats(force_refresh: bool = False) -> dict:
     """
     Load MoneyPuck team season summary (xG/HDCF/PP/PK) from CSV. Returns a dict keyed by team code.
@@ -745,6 +836,141 @@ TEAM_CODE_TO_ID = {
     "WSH": 15,
 }
 
+
+def _name_to_code(name: str) -> Optional[str]:
+    if not name:
+        return None
+    cleaned = " ".join(name.upper().replace(".", "").split())
+    return TEAM_NAME_TO_CODE.get(cleaned)
+
+
+def load_schedule_for_date_apisports(date_str: str, force_refresh: bool = False):
+    """
+    Load schedule for a specific date from API-Sports Hockey if configured.
+    Returns same shape as ESPN schedule loader: list of {date, home_team, away_team}.
+    """
+    if not APISPORTS_API_KEY:
+        return []
+    season = _apisports_hockey_season()
+    params = {
+        "league": APISPORTS_HOCKEY_LEAGUE,
+        "season": season,
+        "date": date_str,
+    }
+    data = _apisports_get(
+        "/games",
+        params=params,
+        cache_name=f"apisports_games_{date_str}.json",
+        ttl_seconds=APISPORTS_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if not data:
+        return []
+
+    games = []
+    try:
+        responses = data.get("response", [])
+    except Exception:
+        responses = []
+    for g in responses:
+        try:
+            fixture = g.get("fixture", {})
+            game_date = fixture.get("date")
+            teams = g.get("teams", {})
+            home = teams.get("home", {})
+            away = teams.get("away", {})
+            home_code = _name_to_code(home.get("name"))
+            away_code = _name_to_code(away.get("name"))
+            if not home_code or not away_code:
+                continue
+            games.append(
+                {
+                    "date": game_date,
+                    "home_team": home_code,
+                    "away_team": away_code,
+                }
+            )
+        except Exception:
+            continue
+    return games
+
+
+def load_current_odds_for_matchup_apisports(home_team: str, away_team: str, date_str: Optional[str] = None, force_refresh: bool = False) -> Optional[dict]:
+    """
+    Try to fetch odds for a matchup from API-Sports Hockey.
+    Returns {home_ml: float, away_ml: float} or None.
+    """
+    if not APISPORTS_API_KEY:
+        return None
+    season = _apisports_hockey_season()
+    date_param = date_str or datetime.today().strftime("%Y-%m-%d")
+    params = {
+        "league": APISPORTS_HOCKEY_LEAGUE,
+        "season": season,
+        "date": date_param,
+    }
+    data = _apisports_get(
+        "/odds",
+        params=params,
+        cache_name=f"apisports_odds_{date_param}.json",
+        ttl_seconds=APISPORTS_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if not data:
+        return None
+
+    try:
+        responses = data.get("response", [])
+    except Exception:
+        responses = []
+
+    home_norm = _normalize_abbr(home_team)
+    away_norm = _normalize_abbr(away_team)
+
+    for item in responses:
+        try:
+            game = item.get("game", {})
+            teams = game.get("teams", {})
+            home_name = teams.get("home", {}).get("name")
+            away_name = teams.get("away", {}).get("name")
+            home_code = _name_to_code(home_name)
+            away_code = _name_to_code(away_name)
+            if home_code != home_norm or away_code != away_norm:
+                continue
+
+            bookmakers = item.get("bookmakers", [])
+            if not bookmakers:
+                continue
+            # Use first bookmaker, first moneyline-style bet
+            home_ml = None
+            away_ml = None
+            for bk in bookmakers:
+                for bet in bk.get("bets", []):
+                    name = (bet.get("name") or "").lower()
+                    if "winner" not in name and "moneyline" not in name:
+                        continue
+                    for v in bet.get("values", []):
+                        val_name = (v.get("value") or "").lower()
+                        try:
+                            price = float(v.get("odd"))
+                        except (TypeError, ValueError):
+                            continue
+                        if val_name in ("home", "1", (home_name or "").lower()):
+                            home_ml = price
+                        if val_name in ("away", "2", (away_name or "").lower()):
+                            away_ml = price
+                    if home_ml is not None and away_ml is not None:
+                        break
+                if home_ml is not None and away_ml is not None:
+                    break
+
+            if home_ml is None or away_ml is None:
+                continue
+            return {"home_ml": home_ml, "away_ml": away_ml}
+        except Exception:
+            continue
+
+    return None
 
 def load_recent_games_for_team_from_api(team_code, num_games=10):
     """
