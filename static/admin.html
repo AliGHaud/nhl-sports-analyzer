@@ -28,9 +28,16 @@
 </head>
 <body>
   <h1>Admin Overrides</h1>
-  <div class="muted">Use your admin token in the field below. Changes are saved to the server overrides JSON.</div>
-  <label for="token">Admin Token</label>
-  <input id="token" type="text" placeholder="Enter admin token (required)" />
+  <div class="muted">Enter admin token, click Unlock, then manage injuries/goalies. Changes save to server overrides JSON.</div>
+  <div class="row" style="align-items:center;">
+    <div>
+      <label for="token">Admin Token</label>
+      <input id="token" type="text" placeholder="Enter admin token (required)" />
+    </div>
+    <div style="flex:0 0 140px; margin-top:24px;">
+      <button id="unlock-btn" style="width:100%; background:#6b7280;">Unlock</button>
+    </div>
+  </div>
 
   <div class="tabs">
     <div class="tab active" data-tab="injuries">Injuries</div>
@@ -48,28 +55,17 @@
         <select id="inj-player"></select>
       </div>
     </div>
-    <div class="row">
-      <div>
-        <label for="inj-status">Status</label>
-        <select id="inj-status">
-          <option value="Out">Out</option>
-          <option value="Doubtful">Doubtful</option>
-          <option value="IR">IR</option>
-          <option value="LTIR">LTIR</option>
-          <option value="Active">Active</option>
-        </select>
-      </div>
-      <div>
-        <label for="inj-prob-goalie">Probable Goalie?</label>
-        <select id="inj-prob-goalie">
-          <option value="">No</option>
-          <option value="Y">Yes</option>
-        </select>
-      </div>
-    </div>
+    <label for="inj-status">Status</label>
+    <select id="inj-status">
+      <option value="Out">Out</option>
+      <option value="Doubtful">Doubtful</option>
+      <option value="IR">IR</option>
+      <option value="LTIR">LTIR</option>
+      <option value="Active">Active</option>
+    </select>
     <label for="inj-note">Note</label>
     <textarea id="inj-note" rows="3" placeholder="Optional note"></textarea>
-    <button id="inj-submit">Add/Update Injury</button>
+    <button id="inj-submit" disabled>Add/Update Injury</button>
     <div id="inj-list"></div>
   </div>
 
@@ -87,7 +83,7 @@
     <div class="input-inline">
       <input type="checkbox" id="g-starter" /> <label for="g-starter">Expected Starter</label>
     </div>
-    <button id="g-submit">Set Goalie Override</button>
+    <button id="g-submit" disabled>Set Goalie Override</button>
     <div id="g-list"></div>
   </div>
 
@@ -110,7 +106,6 @@
     const injPlayer = document.getElementById("inj-player");
     const injStatus = document.getElementById("inj-status");
     const injNote = document.getElementById("inj-note");
-    const injProb = document.getElementById("inj-prob-goalie");
     const injSubmit = document.getElementById("inj-submit");
     const injList = document.getElementById("inj-list");
 
@@ -125,6 +120,7 @@
     let overrides = { injuries: [], goalies: [] };
     let rosters = {};
     let teams = [];
+    let unlocked = false;
 
     function setStatus(msg, cls = "") {
       statusEl.className = cls || "muted";
@@ -197,17 +193,45 @@
 
     function renderLists() {
       injList.innerHTML = "";
-      (overrides.injuries || []).forEach((i) => {
+      (overrides.injuries || []).forEach((i, idx) => {
         const div = document.createElement("div");
         div.className = "pill";
-        div.textContent = `${i.team} - ${i.player} (${i.status || "n/a"}) ${i.note ? "- " + i.note : ""}`;
+        const span = document.createElement("span");
+        span.textContent = `${i.team} - ${i.player} (${i.status || "n/a"}) ${i.note ? "- " + i.note : ""}`;
+        const btn = document.createElement("button");
+        btn.textContent = "×";
+        btn.style.marginLeft = "8px";
+        btn.style.border = "none";
+        btn.style.background = "transparent";
+        btn.style.cursor = "pointer";
+        btn.addEventListener("click", () => {
+          overrides.injuries.splice(idx, 1);
+          renderLists();
+          saveOverrides();
+        });
+        div.appendChild(span);
+        div.appendChild(btn);
         injList.appendChild(div);
       });
       gList.innerHTML = "";
-      (overrides.goalies || []).forEach((g) => {
+      (overrides.goalies || []).forEach((g, idx) => {
         const div = document.createElement("div");
         div.className = "pill";
-        div.textContent = `${g.team} - ${g.goalie} ${g.expected_starter ? "(Starter)" : ""}`;
+        const span = document.createElement("span");
+        span.textContent = `${g.team} - ${g.goalie} ${g.expected_starter ? "(Starter)" : ""}`;
+        const btn = document.createElement("button");
+        btn.textContent = "×";
+        btn.style.marginLeft = "8px";
+        btn.style.border = "none";
+        btn.style.background = "transparent";
+        btn.style.cursor = "pointer";
+        btn.addEventListener("click", () => {
+          overrides.goalies.splice(idx, 1);
+          renderLists();
+          saveOverrides();
+        });
+        div.appendChild(span);
+        div.appendChild(btn);
         gList.appendChild(div);
       });
     }
@@ -228,6 +252,7 @@
           },
           body: payload,
         });
+        await loadOverrides();
         setStatus("Saved.", "success");
       } catch (e) {
         setStatus("Save failed (check token).", "danger");
@@ -238,12 +263,15 @@
     gTeam.addEventListener("change", () => loadRoster(gTeam.value));
 
     injSubmit.addEventListener("click", () => {
+      if (!unlocked) {
+        setStatus("Unlock with admin token first.", "danger");
+        return;
+      }
       const entry = {
         team: injTeam.value,
         player: injPlayer.value,
         status: injStatus.value,
         note: injNote.value,
-        probable_goalie: injProb.value === "Y",
         updated_at: new Date().toISOString(),
       };
       overrides.injuries = overrides.injuries.filter(
@@ -255,6 +283,10 @@
     });
 
     gSubmit.addEventListener("click", () => {
+      if (!unlocked) {
+        setStatus("Unlock with admin token first.", "danger");
+        return;
+      }
       const entry = {
         team: gTeam.value,
         goalie: gGoalie.value,
@@ -269,10 +301,29 @@
       saveOverrides();
     });
 
+    document.getElementById("unlock-btn").addEventListener("click", async () => {
+      if (!tokenInput.value.trim()) {
+        setStatus("Enter admin token first.", "danger");
+        return;
+      }
+      try {
+        await loadOverrides();
+        unlocked = true;
+        injSubmit.disabled = false;
+        gSubmit.disabled = false;
+        document.getElementById("unlock-btn").style.background = "#16a34a";
+        document.getElementById("unlock-btn").textContent = "Unlocked";
+        setStatus("Unlocked and overrides loaded.", "success");
+      } catch (e) {
+        unlocked = false;
+        injSubmit.disabled = true;
+        gSubmit.disabled = true;
+      }
+    });
+
     // Initial load
     (async () => {
       await loadTeams();
-      await loadOverrides();
     })();
   </script>
 </body>
