@@ -17,7 +17,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
 - API-Sports (optional): API-Sports Hockey fixtures/odds via `API_SPORTS_KEY` (league=57), fallback to ESPN when unset/unavailable.
-- Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`.
+- Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`; unlock now enforced by valid token; remove buttons visible; persists when volume mounted on data/cache.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.
 - UI: modal popup for Today’s “Analyze” that shows matchup summary/reasons/EV/teams; Today and modal calls default to force_refresh for fresher data.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
@@ -42,6 +42,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Special teams: small PP/PK net factor (~0.3); season-long, low weight.
 - HDF%: de-emphasized (dropped) to avoid double-counting xG.
 - Data feeds: ESPN (games/odds, fallback), API-Sports Hockey (fixtures/odds when `API_SPORTS_KEY` is set), MoneyPuck (xG/adv), ESPN roster/stats for goalies.
+- Persistence: manual overrides persist across redeploys when data/cache is mounted on a Render volume; otherwise overrides are ephemeral.
 
 ## Next Actions
 1) Monitor/tune new lean weights and de-duplication: watch outputs and adjust recency/home/GA/xG/goalie/special-teams balances if needed.

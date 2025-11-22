@@ -24,6 +24,7 @@
     .danger { color: #b91c1c; }
     .success { color: #166534; }
     .input-inline { display: flex; gap: 8px; align-items: center; }
+    .pill button.remove { color: #b91c1c; font-weight: 700; margin-left: 8px; border: none; background: transparent; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -195,10 +196,7 @@
         span.textContent = `${i.team} - ${i.player} (${i.status || "n/a"}) ${i.note ? "- " + i.note : ""}`;
         const btn = document.createElement("button");
         btn.textContent = "×";
-        btn.style.marginLeft = "8px";
-        btn.style.border = "none";
-        btn.style.background = "transparent";
-        btn.style.cursor = "pointer";
+        btn.className = "remove";
         btn.addEventListener("click", () => {
           overrides.injuries.splice(idx, 1);
           renderLists();
@@ -216,10 +214,7 @@
         span.textContent = `${g.team} - ${g.goalie} ${g.expected_starter ? "(Starter)" : ""}`;
         const btn = document.createElement("button");
         btn.textContent = "×";
-        btn.style.marginLeft = "8px";
-        btn.style.border = "none";
-        btn.style.background = "transparent";
-        btn.style.cursor = "pointer";
+        btn.className = "remove";
         btn.addEventListener("click", () => {
           overrides.goalies.splice(idx, 1);
           renderLists();
