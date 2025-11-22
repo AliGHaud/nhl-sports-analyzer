@@ -176,19 +176,14 @@
     async function loadOverrides() {
       const token = tokenInput.value.trim();
       if (!token) {
-        setStatus("Enter admin token to load overrides.", "danger");
-        return;
+        throw new Error("Enter admin token to load overrides.");
       }
-      try {
-        const data = await fetchJSON("/admin/overrides", {
-          headers: { "x-admin-token": token },
-        });
-        overrides = data || { injuries: [], goalies: [] };
-        renderLists();
-        setStatus("Overrides loaded.", "success");
-      } catch (e) {
-        setStatus("Failed to load overrides (check token).", "danger");
-      }
+      const data = await fetchJSON("/admin/overrides", {
+        headers: { "x-admin-token": token },
+      });
+      overrides = data || { injuries: [], goalies: [] };
+      renderLists();
+      setStatus("Overrides loaded.", "success");
     }
 
     function renderLists() {
@@ -301,7 +296,8 @@
       saveOverrides();
     });
 
-    document.getElementById("unlock-btn").addEventListener("click", async () => {
+    const unlockBtn = document.getElementById("unlock-btn");
+    unlockBtn.addEventListener("click", async () => {
       if (!tokenInput.value.trim()) {
         setStatus("Enter admin token first.", "danger");
         return;
@@ -311,13 +307,16 @@
         unlocked = true;
         injSubmit.disabled = false;
         gSubmit.disabled = false;
-        document.getElementById("unlock-btn").style.background = "#16a34a";
-        document.getElementById("unlock-btn").textContent = "Unlocked";
+        unlockBtn.style.background = "#16a34a";
+        unlockBtn.textContent = "Unlocked";
         setStatus("Unlocked and overrides loaded.", "success");
       } catch (e) {
         unlocked = false;
         injSubmit.disabled = true;
         gSubmit.disabled = true;
+        unlockBtn.style.background = "#6b7280";
+        unlockBtn.textContent = "Unlock";
+        setStatus("Unlock failed (check token).", "danger");
       }
     });
 
