@@ -801,39 +801,39 @@ def _safe_int(val):
 
 # Legacy NHL Stats API bits (network blocked on your side)
 TEAM_CODE_TO_ID = {
-    "ANA": 24,
-    "ARI": 53,
-    "BOS": 6,
-    "BUF": 7,
-    "CAR": 12,
+    "ANA": 25,
+    "ARI": 129764,  # Utah/Arizona franchise
+    "UTA": 129764,
+    "BOS": 1,
+    "BUF": 2,
+    "CAR": 7,
     "CBJ": 29,
-    "CGY": 20,
-    "CHI": 16,
-    "COL": 21,
-    "DAL": 25,
-    "DET": 17,
-    "EDM": 22,
-    "FLA": 13,
-    "LAK": 26,
+    "CGY": 3,
+    "CHI": 4,
+    "COL": 17,
+    "DAL": 9,
+    "DET": 5,
+    "EDM": 6,
+    "FLA": 26,
+    "LAK": 8,  # ESPN uses LA
     "MIN": 30,
-    "MTL": 8,
-    "NJD": 1,
-    "NSH": 18,
-    "NYI": 2,
-    "NYR": 3,
-    "OTT": 9,
-    "PHI": 4,
-    "PIT": 5,
-    "SEA": 55,
-    "SJS": 28,
+    "MTL": 10,
+    "NJD": 11,  # ESPN uses NJ
+    "NSH": 27,
+    "NYI": 12,
+    "NYR": 13,
+    "OTT": 14,
+    "PHI": 15,
+    "PIT": 16,
+    "SEA": 124292,
+    "SJS": 18,  # ESPN uses SJ
     "STL": 19,
-    "TBL": 14,
-    "TOR": 10,
-    "UTA": 54,  # Utah (former ARI, adjust if needed)
-    "VAN": 23,
-    "VGK": 54,  # may differ by season
-    "WPG": 52,
-    "WSH": 15,
+    "TBL": 20,  # ESPN uses TB
+    "TOR": 21,
+    "VAN": 22,
+    "VGK": 37,
+    "WPG": 28,
+    "WSH": 23,
 }
 
 
