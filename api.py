@@ -32,6 +32,7 @@ from data_sources import (
     write_pick_cache,
     load_injuries_rotowire,
     load_moneypuck_player_stats,
+    load_projected_goalies,
     get_probable_goalie,
     get_team_adv_stats,
     load_nhl_team_stats,
@@ -232,6 +233,7 @@ def _snapshot_all_matchups_for_date(
     """Compute and write snapshots for all matchups on a given date."""
     player_stats = load_moneypuck_player_stats(force_refresh=force_refresh)
     schedule = load_schedule_for_date(date_str, force_refresh=force_refresh)
+    projected_goalies = load_projected_goalies(date_str, force_refresh=force_refresh)
     now = _now_in_zone()
     end_dt = datetime.strptime(date_str, "%Y-%m-%d").date()
     start_dt = end_dt - timedelta(days=lookback_days)
@@ -273,6 +275,7 @@ def _snapshot_all_matchups_for_date(
                 force_refresh=force_refresh,
                 injuries_home=home_inj_list,
                 injuries_away=away_inj_list,
+                projected_goalies=projected_goalies.get("items") if projected_goalies else None,
             )
         except Exception:
             continue
@@ -423,6 +426,7 @@ def _lean_scores(
     force_refresh: bool = False,
     injuries_home=None,
     injuries_away=None,
+    projected_goalies=None,
 ) -> Tuple[float, float, dict]:
     """Pure version of the lean logic: returns scores + reasons."""
     today = _now_in_zone().date()
@@ -560,8 +564,8 @@ def _lean_scores(
 
     # Goalie edge (heuristic)
     try:
-        home_g = get_probable_goalie(home_team, force_refresh=force_refresh)
-        away_g = get_probable_goalie(away_team, force_refresh=force_refresh)
+        home_g = get_probable_goalie(home_team, force_refresh=force_refresh, projected=projected_goalies)
+        away_g = get_probable_goalie(away_team, force_refresh=force_refresh, projected=projected_goalies)
     except Exception:
         home_g = None
         away_g = None
@@ -906,12 +910,17 @@ def nhl_matchup(
 
     injuries = None
     player_stats = None
+    projected_goalies = None
     if include_injuries:
         try:
             player_stats = load_moneypuck_player_stats(force_refresh=False)
             injuries = _injuries_by_team(force_refresh=force_refresh, player_stats=player_stats)
         except Exception:
             injuries = None
+    try:
+        projected_goalies = load_projected_goalies(end_str, force_refresh=force_refresh)
+    except Exception:
+        projected_goalies = None
 
     try:
         home_inj_list = injuries["items"].get(home) if injuries and injuries.get("items") else None
@@ -923,6 +932,7 @@ def nhl_matchup(
             force_refresh=force_refresh,
             injuries_home=home_inj_list,
             injuries_away=away_inj_list,
+            projected_goalies=projected_goalies["items"] if projected_goalies else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -977,6 +987,21 @@ def nhl_matchup(
             "away": injuries["items"].get(away) if injuries.get("items") else None,
             "source": injuries.get("source"),
             "fetched_at": injuries.get("fetched_at"),
+        }
+        response.setdefault("goalies", {})  # ensure key exists for snapshots without projected info
+    if projected_goalies:
+        response["goalies"] = {
+            "home": projected_goalies["items"].get(home) if projected_goalies.get("items") else None,
+            "away": projected_goalies["items"].get(away) if projected_goalies.get("items") else None,
+            "source": projected_goalies.get("source"),
+            "fetched_at": projected_goalies.get("fetched_at"),
+        }
+    if projected_goalies:
+        response["goalies"] = {
+            "home": projected_goalies["items"].get(home) if projected_goalies.get("items") else None,
+            "away": projected_goalies["items"].get(away) if projected_goalies.get("items") else None,
+            "source": projected_goalies.get("source"),
+            "fetched_at": projected_goalies.get("fetched_at"),
         }
 
     return response

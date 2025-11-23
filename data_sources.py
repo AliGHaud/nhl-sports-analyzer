@@ -34,6 +34,11 @@ INJURY_URL = os.getenv(
     "https://www.rotowire.com/hockey/tables/injury-report.php?team=ALL&pos=ALL",
 )
 INJURY_TTL_SECONDS = 4 * 3600  # 4 hours
+PROJECTED_GOALIES_URL = os.getenv(
+    "PROJECTED_GOALIES_URL",
+    "https://www.rotowire.com/hockey/tables/projected-goalies.php?date={date}",
+)
+PROJECTED_GOALIES_TTL_SECONDS = 4 * 3600
 
 logger = logging.getLogger("data_sources")
 
@@ -639,9 +644,10 @@ def _goalie_stats_from_payload(payload) -> dict:
     }
 
 
-def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional[dict]:
+def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: Optional[dict] = None) -> Optional[dict]:
     """
-    Heuristic probable goalie: pick the goalie with most games started; break ties by save_pct.
+    Choose probable goalie. If a projected starter is provided and matches roster by name, use that.
+    Otherwise pick the goalie with most games started; break ties by save_pct.
     """
     roster = load_team_roster(team_code, force_refresh=force_refresh)
     if not roster:
@@ -651,6 +657,13 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional
         athletes = roster.get("athletes", [])
     except Exception:
         return None
+
+    projected_entry = None
+    if projected:
+        projected_entry = projected.get(_normalize_abbr(team_code))
+        proj_name_norm = _normalize_name_key(projected_entry["goalie"]) if projected_entry and projected_entry.get("goalie") else None
+    else:
+        proj_name_norm = None
 
     goalies = []
     for group in athletes:
@@ -665,18 +678,28 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional
                 full_name = g.get("fullName") or g.get("displayName")
             except Exception:
                 continue
-            stats_payload = load_goalie_stats(athlete_id, force_refresh=force_refresh)
+            name_norm = _normalize_name_key(full_name)
+            is_projected_match = proj_name_norm and name_norm == proj_name_norm
+            stats_payload = load_goalie_stats(athlete_id, force_refresh=force_refresh or is_projected_match)
             stats = _goalie_stats_from_payload(stats_payload) if stats_payload else {}
             goalies.append(
                 {
                     "id": athlete_id,
                     "name": full_name,
+                    "name_norm": name_norm,
                     "stats": stats,
+                    "projected": is_projected_match,
                 }
             )
 
     if not goalies:
         return None
+
+    # Prefer projected match if available; otherwise fallback to games started/save_pct
+    projected_goalies = [g for g in goalies if g.get("projected")]
+    if projected_goalies:
+        # if multiple match, still sort by starts/sv as tie-breaker
+        goalies = projected_goalies
 
     def sort_key(g):
         gs = g["stats"].get("games_started") or 0
@@ -684,7 +707,10 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False) -> Optional
         return (gs, sv)
 
     goalies.sort(key=sort_key, reverse=True)
-    return goalies[0]
+    chosen = goalies[0]
+    if projected_entry:
+        chosen["projected_info"] = projected_entry
+    return chosen
 
 
 def _current_season_slug() -> str:
@@ -917,6 +943,60 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
         return payload
     except Exception as e:
         logger.exception("Injury fetch parse failed: %s", e)
+        return _read_cache(cache_path, ttl_seconds=None)
+
+
+def load_projected_goalies(date_str: str, force_refresh: bool = False) -> Optional[dict]:
+    """
+    Fetch projected starting goalies for a given date (YYYY-MM-DD) from Rotowire and cache it.
+    Returns a dict with items keyed by team code.
+    """
+    cache_path = CACHE_DIR / f"projected_goalies_{date_str}.json"
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=PROJECTED_GOALIES_TTL_SECONDS)
+        if cached is not None:
+            return cached
+
+    url = PROJECTED_GOALIES_URL.format(date=date_str)
+    text = _read_text(url)
+    if text is None:
+        return _read_cache(cache_path, ttl_seconds=None)
+    try:
+        data = json.loads(text)
+        items = {}
+        for entry in data:
+            try:
+                home = _normalize_abbr(entry.get("hometeam"))
+                away = _normalize_abbr(entry.get("visitteam"))
+                if home:
+                    items[home] = {
+                        "team": home,
+                        "opponent": away,
+                        "goalie": entry.get("homePlayer"),
+                        "status": entry.get("homeStatus"),
+                        "source": "rotowire",
+                    }
+                if away:
+                    items[away] = {
+                        "team": away,
+                        "opponent": home,
+                        "goalie": entry.get("visitPlayer"),
+                        "status": entry.get("visitStatus"),
+                        "source": "rotowire",
+                    }
+            except Exception:
+                continue
+        if not items:
+            return _read_cache(cache_path, ttl_seconds=None)
+        payload = {
+            "date": date_str,
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "items": items,
+            "source": "rotowire",
+        }
+        _write_cache(cache_path, payload)
+        return payload
+    except Exception:
         return _read_cache(cache_path, ttl_seconds=None)
 
 

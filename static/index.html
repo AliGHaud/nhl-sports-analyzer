@@ -195,6 +195,9 @@
       const model = data.model_prob || {};
       const homeProb = model.home === undefined || model.home === null ? '-' : `${fmt(model.home * 100)}%`;
       const awayProb = model.away === undefined || model.away === null ? '-' : `${fmt(model.away * 100)}%`;
+      const goalies = data.goalies || {};
+      const homeGoalie = goalies.home ? `${goalies.home.goalie || '-'} (${goalies.home.status || 'Unknown'})` : 'Unknown';
+      const awayGoalie = goalies.away ? `${goalies.away.goalie || '-'} (${goalies.away.status || 'Unknown'})` : 'Unknown';
       const headline = `${params.away} @ ${params.home}`;
       targetEl.innerHTML = `
         <div class="row" style="justify-content: space-between; align-items: center;">
@@ -214,6 +217,10 @@
         <div style="margin-top:10px;" class="row">
           <div class="pill"><strong>Model prob ${params.home}:</strong> ${homeProb}</div>
           <div class="pill"><strong>Model prob ${params.away}:</strong> ${awayProb}</div>
+        </div>
+        <div style="margin-top:10px;" class="row">
+          <div class="pill"><strong>Projected ${params.home} G:</strong> ${homeGoalie}</div>
+          <div class="pill"><strong>Projected ${params.away} G:</strong> ${awayGoalie}</div>
         </div>
       `;
       targetEl.style.display = 'block';
