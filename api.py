@@ -902,6 +902,13 @@ def nhl_matchup(
             detail="Not enough data for one or both teams in this range.",
         )
 
+    injuries = None
+    if include_injuries:
+        try:
+            injuries = _injuries_by_team(force_refresh=force_refresh)
+        except Exception:
+            injuries = None
+
     try:
         home_inj_list = injuries["items"].get(home) if injuries and injuries.get("items") else None
         away_inj_list = injuries["items"].get(away) if injuries and injuries.get("items") else None
@@ -934,13 +941,6 @@ def nhl_matchup(
         side_lean = f"{away} ML (slight lean)"
     else:
         side_lean = "No clear edge"
-
-    injuries = None
-    if include_injuries:
-        try:
-            injuries = _injuries_by_team(force_refresh=force_refresh)
-        except Exception:
-            injuries = None
 
     response = {
         "params": {
