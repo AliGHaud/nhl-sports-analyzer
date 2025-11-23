@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urljoin
+import logging
 
 import requests
 from requests.exceptions import RequestException
@@ -32,6 +33,8 @@ INJURY_URL = os.getenv(
     "https://www.rotowire.com/hockey/tables/injury-report.php?team=ALL&pos=ALL",
 )
 INJURY_TTL_SECONDS = 4 * 3600  # 4 hours
+
+logger = logging.getLogger("data_sources")
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -117,7 +120,12 @@ def _read_text(url: str, timeout: int = 10):
         resp = requests.get(url, timeout=timeout, headers=headers)
         resp.raise_for_status()
         return resp.text
-    except RequestException:
+    except RequestException as e:
+        try:
+            status = getattr(e.response, "status_code", None)
+        except Exception:
+            status = None
+        logger.warning("Injury fetch failed (status=%s): %s", status, e)
         return None
 
 
@@ -865,7 +873,10 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
 
     text = _read_text(INJURY_URL)
     if text is None:
-        return _read_cache(cache_path, ttl_seconds=None)
+        cached = _read_cache(cache_path, ttl_seconds=None)
+        if cached is None:
+            logger.error("Injury fetch failed and no cache available.")
+        return cached
     try:
         data = json.loads(text)
         body = data.get("body") or data
@@ -885,7 +896,8 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
         }
         _write_cache(cache_path, payload)
         return payload
-    except Exception:
+    except Exception as e:
+        logger.exception("Injury fetch parse failed: %s", e)
         return _read_cache(cache_path, ttl_seconds=None)
 
 
