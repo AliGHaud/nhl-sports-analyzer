@@ -473,6 +473,16 @@ def _goalie_rating_for_team(
     if projected_goalies:
         proj_entry = projected_goalies.get(team_code)
     probable = get_probable_goalie(team_code, force_refresh=force_refresh, projected=projected_goalies)
+
+    # Fallback: if no probable goalie found but a projected name exists, synthesize a stub to allow rating
+    if not probable and proj_entry and proj_entry.get("goalie"):
+        probable = {
+            "id": None,
+            "name": proj_entry.get("goalie"),
+            "name_norm": _normalize_name_key(proj_entry.get("goalie")),
+            "stats": {},
+            "projected": True,
+        }
     if not probable:
         return 0.0, ["Goalie data unavailable"], {"start_prob": 0.0}
 
