@@ -188,6 +188,8 @@
 
     function renderSummary(data, targetEl = summaryEl) {
       const { params, side } = data;
+      const computedAt = data.computed_at ? new Date(data.computed_at).toLocaleString() : 'Unknown time';
+      const snapshotLabel = data.snapshot_used ? `Snapshot as of ${computedAt}` : `Computed at ${computedAt}`;
       const model = data.model_prob || {};
       const homeProb = model.home === undefined || model.home === null ? '-' : `${fmt(model.home * 100)}%`;
       const awayProb = model.away === undefined || model.away === null ? '-' : `${fmt(model.away * 100)}%`;
@@ -198,7 +200,10 @@
             <h3 style="margin:0;">${headline}</h3>
             <div class="muted">${params.start_date} to ${params.end_date} ${params.force_refresh ? '(fresh)' : ''}</div>
           </div>
-          <div class="pill warn"><strong>Lean:</strong> ${side.lean}</div>
+          <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+            <div class="pill warn"><strong>Lean:</strong> ${side.lean}</div>
+            <div class="pill"><strong>${data.snapshot_used ? 'Snapshot' : 'Live'}:</strong> ${snapshotLabel}</div>
+          </div>
         </div>
         <div style="margin-top:12px;" class="row">
           <div class="pill"><strong>${params.home}</strong> score ${fmt(side.home_score)}</div>

@@ -70,6 +70,7 @@ PICK_GATE_MINUTE = int(os.getenv("PICK_GATE_MINUTE", "0"))
 DEFAULT_LOOKBACK_DAYS = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "45"))
 API_ADMIN_TOKEN = os.getenv("API_ADMIN_TOKEN")
 MANUAL_OVERRIDES_PATH = CACHE_DIR / "manual_overrides.json"
+SNAPSHOT_DIR = Path(os.getenv("SNAPSHOT_DIR", CACHE_DIR / "snapshots"))
 
 
 # ---------- Helpers ----------
@@ -152,6 +153,33 @@ def _require_admin(request: Request):
     token = request.headers.get("x-admin-token") or request.headers.get("X-Admin-Token")
     if token != API_ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _matchup_snapshot_path(date_str: str, home: str, away: str) -> Path:
+    safe_home = (home or "").upper()
+    safe_away = (away or "").upper()
+    return SNAPSHOT_DIR / "matchups" / date_str / f"{safe_away}_at_{safe_home}.json"
+
+
+def _read_matchup_snapshot(date_str: str, home: str, away: str) -> Optional[dict]:
+    path = _matchup_snapshot_path(date_str, home, away)
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_matchup_snapshot(date_str: str, home: str, away: str, data: dict) -> None:
+    path = _matchup_snapshot_path(date_str, home, away)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 
 def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = False) -> Tuple[float, float, dict]:
@@ -548,6 +576,10 @@ def nhl_matchup(
         False,
         description="If true, bypass cached ESPN responses for this request.",
     ),
+    use_snapshot: bool = Query(
+        True,
+        description="If true and using default range for today, return/write a persisted daily snapshot instead of recomputing.",
+    ),
     ):
     # Defaults: last 45 days to keep fetches fast and recent
     now = _now_in_zone()
@@ -564,6 +596,22 @@ def nhl_matchup(
 
     start_str = start_dt.isoformat()
     end_str = end_dt.isoformat()
+
+    home = _validate_team_or_400(home, "home")
+    away = _validate_team_or_400(away, "away")
+
+    is_default_range_today = (
+        start_date is None
+        and end_date is None
+        and end_dt == today
+    )
+    snapshot_allowed = use_snapshot and not force_refresh and is_default_range_today
+
+    if snapshot_allowed:
+        snap = _read_matchup_snapshot(end_str, home, away)
+        if snap:
+            snap["snapshot_used"] = True
+            return snap
 
     try:
         games = load_games_from_espn_date_range(
@@ -588,9 +636,6 @@ def nhl_matchup(
                 "Try widening the dates."
             ),
         )
-
-    home = _validate_team_or_400(home, "home")
-    away = _validate_team_or_400(away, "away")
 
     today = _now_in_zone().date()
     home_profile = get_team_profile(home, games, today=today)
@@ -632,13 +677,14 @@ def nhl_matchup(
     else:
         side_lean = "No clear edge"
 
-    return {
+    response = {
         "params": {
             "home": home,
             "away": away,
             "start_date": start_str,
             "end_date": end_str,
             "force_refresh": force_refresh,
+            "use_snapshot": use_snapshot,
         },
         "side": {
             "home_score": home_score,
@@ -652,7 +698,18 @@ def nhl_matchup(
             "home": _profile_summary(home_profile),
             "away": _profile_summary(away_profile),
         },
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "snapshot_used": False,
     }
+
+    if snapshot_allowed:
+        response["snapshot_used"] = True
+        try:
+            _write_matchup_snapshot(end_str, home, away, response)
+        except Exception:
+            pass
+
+    return response
 
 
 @app.get("/nhl/team")
