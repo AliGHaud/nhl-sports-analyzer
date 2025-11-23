@@ -8,6 +8,7 @@ from io import StringIO
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urljoin
 
 import requests
 from requests.exceptions import RequestException
@@ -26,6 +27,11 @@ APISPORTS_API_KEY = os.getenv("API_SPORTS_KEY")
 APISPORTS_HOCKEY_LEAGUE = os.getenv("APISPORTS_HOCKEY_LEAGUE", "57")  # NHL league id in API-Sports
 APISPORTS_HOCKEY_SEASON = os.getenv("APISPORTS_HOCKEY_SEASON")  # e.g., "2024" for 2024-2025 season
 APISPORTS_TTL_SECONDS = 600
+INJURY_URL = os.getenv(
+    "INJURY_URL",
+    "https://www.rotowire.com/hockey/tables/injury-report.php?team=ALL&pos=ALL",
+)
+INJURY_TTL_SECONDS = 4 * 3600  # 4 hours
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -103,6 +109,15 @@ def _write_cache(cache_path, data):
             json.dump(data, f)
     except Exception:
         pass
+
+
+def _read_text(url: str, timeout: int = 10):
+    try:
+        resp = requests.get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp.text
+    except RequestException:
+        return None
 
 
 def _fetch_scoreboard_json(
@@ -783,6 +798,91 @@ def load_nhl_team_stats(force_refresh: bool = False) -> dict:
 
     _write_cache(cache_path, result)
     return result
+
+
+def _is_important_injury(entry: dict, player_stats: Optional[dict] = None) -> bool:
+    """
+    Determine if an injured player is a key contributor based on usage/performance.
+    Option A thresholds:
+    - Skater: games_played >= 5 and toi_per_game > 12
+    - Goalie: starts (or games_played) >= 5 and save_pct >= 0.895
+    Missing stats => False.
+    """
+    if not player_stats:
+        return False
+    player = entry.get("player")
+    if not player:
+        return False
+    stats = player_stats.get(player)
+    if not stats:
+        return False
+
+    is_goalie = bool(stats.get("is_goalie")) or (entry.get("pos") == "G")
+    games = stats.get("games_played") or stats.get("starts")
+    if games is None:
+        return False
+
+    # Option A thresholds
+    if is_goalie:
+        save_pct = stats.get("save_pct")
+        return games >= 5 and save_pct is not None and save_pct >= 0.895
+    toi = stats.get("toi_per_game")
+    return games >= 5 and toi is not None and toi > 12
+
+
+def _normalize_injury_entry(entry: dict, player_stats: Optional[dict] = None) -> Optional[dict]:
+    try:
+        team = entry.get("team")
+        player = entry.get("player")
+        if not team or not player:
+            return None
+        important = _is_important_injury(entry, player_stats=player_stats)
+        return {
+            "team": team,
+            "player": player,
+            "position": entry.get("pos"),
+            "injury": entry.get("injury"),
+            "status": entry.get("status"),
+            "return": entry.get("estReturn"),
+            "note": entry.get("note") or entry.get("notes"),
+            "updated": entry.get("updateDate") or entry.get("date"),
+            "important": important,
+        }
+    except Exception:
+        return None
+
+
+def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[dict] = None):
+    """
+    Fetch rotowire injury report JSON and cache it.
+    """
+    cache_path = CACHE_DIR / "injuries_rotowire.json"
+    if not force_refresh:
+        cached = _read_cache(cache_path, ttl_seconds=INJURY_TTL_SECONDS)
+        if cached is not None:
+            return cached
+
+    text = _read_text(INJURY_URL)
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+        body = data.get("body") or data
+        normalized = []
+        for entry in body:
+            norm = _normalize_injury_entry(entry, player_stats=player_stats)
+            if norm:
+                normalized.append(norm)
+        payload = {
+            "source": "rotowire",
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "count": len(normalized),
+            "items": normalized,
+        }
+        _write_cache(cache_path, payload)
+        return payload
+    except Exception:
+        return None
 
 
 def _safe_float(val):

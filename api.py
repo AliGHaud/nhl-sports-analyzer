@@ -30,6 +30,7 @@ from data_sources import (
     TEAM_CODE_TO_ID,
     read_pick_cache,
     write_pick_cache,
+    load_injuries_rotowire,
     get_probable_goalie,
     get_team_adv_stats,
     load_nhl_team_stats,
@@ -204,6 +205,22 @@ def _write_pick_snapshot(date_str: str, data: dict) -> None:
             json.dump(data, f)
     except Exception:
         pass
+
+
+def _injuries_by_team(force_refresh: bool = False, player_stats: Optional[dict] = None) -> dict:
+    data = load_injuries_rotowire(force_refresh=force_refresh, player_stats=player_stats) or {}
+    items = data.get("items") or []
+    by_team = {}
+    for entry in items:
+        team = entry.get("team")
+        if not team:
+            continue
+        by_team.setdefault(team, []).append(entry)
+    return {
+        "source": data.get("source"),
+        "fetched_at": data.get("fetched_at"),
+        "items": by_team,
+    }
 
 
 def _snapshot_all_matchups_for_date(
@@ -721,10 +738,15 @@ def nhl_matchup(
         True,
         description="If true and using default range for today, return/write a persisted daily snapshot instead of recomputing.",
     ),
+    include_injuries: bool = Query(
+        True,
+        description="If true, include injury lists per team (rotowire).",
+    ),
     ):
     # Defaults: last 45 days to keep fetches fast and recent
     now = _now_in_zone()
     today = now.date()
+    pick_gate = time(PICK_GATE_HOUR, PICK_GATE_MINUTE)
     default_start = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     start_dt = _parse_date_or_400(start_date, default_start, "start_date")
     end_dt = _parse_date_or_400(end_date, today, "end_date")
@@ -746,7 +768,12 @@ def nhl_matchup(
         and end_date is None
         and end_dt == today
     )
-    snapshot_allowed = use_snapshot and not force_refresh and is_default_range_today
+    snapshot_allowed = (
+        use_snapshot
+        and not force_refresh
+        and is_default_range_today
+        and now.time() >= pick_gate
+    )
 
     if snapshot_allowed:
         snap = _read_matchup_snapshot(end_str, home, away)
@@ -818,6 +845,13 @@ def nhl_matchup(
     else:
         side_lean = "No clear edge"
 
+    injuries = None
+    if include_injuries:
+        try:
+            injuries = _injuries_by_team(force_refresh=force_refresh)
+        except Exception:
+            injuries = None
+
     response = {
         "params": {
             "home": home,
@@ -826,6 +860,7 @@ def nhl_matchup(
             "end_date": end_str,
             "force_refresh": force_refresh,
             "use_snapshot": use_snapshot,
+            "include_injuries": include_injuries,
         },
         "side": {
             "home_score": home_score,
@@ -842,13 +877,13 @@ def nhl_matchup(
         "computed_at": datetime.now(timezone.utc).isoformat(),
         "snapshot_used": False,
     }
-
-    if snapshot_allowed:
-        response["snapshot_used"] = True
-        try:
-            _write_matchup_snapshot(end_str, home, away, response)
-        except Exception:
-            pass
+    if injuries:
+        response["injuries"] = {
+            "home": injuries["items"].get(home) if injuries.get("items") else None,
+            "away": injuries["items"].get(away) if injuries.get("items") else None,
+            "source": injuries.get("source"),
+            "fetched_at": injuries.get("fetched_at"),
+        }
 
     return response
 
@@ -1165,3 +1200,11 @@ def update_overrides(payload: OverridePayload, request: Request):
     }
     _write_overrides(data)
     return {"status": "ok", "overrides": data}
+
+
+@app.get("/nhl/injuries")
+def nhl_injuries(force_refresh: bool = Query(False, description="Refresh cached injuries")):
+    injuries = load_injuries_rotowire(force_refresh=force_refresh)
+    if not injuries:
+        raise HTTPException(status_code=502, detail="Injury feed unavailable.")
+    return injuries

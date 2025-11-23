@@ -101,6 +101,7 @@
     <div id="reasons" class="card" style="display:none;"></div>
     <div id="ev" class="card" style="display:none;"></div>
   </div>
+  <div id="injuries" class="card" style="display:none;"></div>
   <div id="teams" class="grid grid-2"></div>
   <div class="card">
     <div class="row" style="justify-content: space-between; align-items: center;">
@@ -138,6 +139,7 @@
     const summaryEl = document.getElementById('summary');
     const reasonsEl = document.getElementById('reasons');
     const evEl = document.getElementById('ev');
+    const injuriesEl = document.getElementById('injuries');
     const teamsEl = document.getElementById('teams');
     const rawEl = document.getElementById('raw');
     const todayGamesEl = document.getElementById('todayGames');
@@ -215,6 +217,24 @@
         </div>
       `;
       targetEl.style.display = 'block';
+    }
+
+    function renderInjuries(data, targetEl = null) {
+      const container = targetEl || document.createElement('div');
+      const injuries = data.injuries || {};
+      const homeList = (injuries.home || []).map(r => `<li>${r.player} (${r.position || ''}) - ${r.status || ''}${r.injury ? `, ${r.injury}` : ''}</li>`).join('') || '<li>No reported injuries</li>';
+      const awayList = (injuries.away || []).map(r => `<li>${r.player} (${r.position || ''}) - ${r.status || ''}${r.injury ? `, ${r.injury}` : ''}</li>`).join('') || '<li>No reported injuries</li>';
+      const meta = injuries.source ? `<div class="muted">Source: ${injuries.source}${injuries.fetched_at ? ` | As of ${new Date(injuries.fetched_at).toLocaleString()}` : ''}</div>` : '';
+      container.innerHTML = `
+        <h3>Injuries</h3>
+        ${meta}
+        <div class="grid grid-2">
+          <div><strong>Home ${data.params.home}</strong><ul>${homeList}</ul></div>
+          <div><strong>Away ${data.params.away}</strong><ul>${awayList}</ul></div>
+        </div>
+      `;
+      container.style.display = 'block';
+      return container;
     }
 
     function renderReasons(side, targetEl = reasonsEl) {
@@ -469,6 +489,7 @@
       summaryEl.style.display = 'none';
       reasonsEl.style.display = 'none';
       evEl.style.display = 'none';
+      injuriesEl.style.display = 'none';
       teamsEl.innerHTML = '';
       out.textContent = 'Loading...';
       try {
@@ -479,6 +500,7 @@
           summaryEl.style.display = 'none';
           reasonsEl.style.display = 'none';
           evEl.style.display = 'none';
+          injuriesEl.style.display = 'none';
           teamsEl.innerHTML = '';
           return;
         }
@@ -486,6 +508,11 @@
         renderSummary(body);
         renderReasons(body.side);
         renderEV(body.ev, body.params);
+        if (body.injuries) {
+          renderInjuries(body, injuriesEl);
+        } else {
+          injuriesEl.style.display = 'none';
+        }
         renderTeams(body.profiles);
       } catch (err) {
         out.textContent = 'Error: ' + err;
@@ -502,6 +529,7 @@
       modalSummary.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
       modalReasons.style.display = 'none';
       modalEv.style.display = 'none';
+      injuriesEl.style.display = 'none';
       modalTeams.innerHTML = '';
       modalBackdrop.style.display = 'flex';
 
@@ -515,6 +543,9 @@
         renderSummary(body, modalSummary);
         renderReasons(body.side, modalReasons);
         renderEV(body.ev, body.params, modalEv);
+        if (body.injuries) {
+          renderInjuries(body, modalReasons); // reuse reasons column for space
+        }
         renderTeams(body.profiles, modalTeams);
       } catch (err) {
         modalSummary.innerHTML = `<div class="error">Error: ${err}</div>`;

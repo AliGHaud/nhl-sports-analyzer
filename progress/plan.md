@@ -9,6 +9,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Data layer: ESPN scoreboard fetch with caching; date-range loader (completed games only); schedule loader; odds loader for today’s games; cache under data/cache; NHL Stats API stub.
 - UI: dark SPA tester at `/` with matchup analysis, team analysis, today’s games with odds, raw JSON view; mobile-friendly styling; odds shown when present.
 - Pick of the Day: API endpoint with EV/edge/model thresholds, noon gate in app timezone; UI card with date/tz and no-pick/early gate states.
+- Pick/Pick gate persistence: daily pick cached; matchup snapshots now only created by the noon job (not on-demand) and served post-gate; all snapshots share the noon timestamp.
 - Timezone-aware “today”: uses configurable `APP_TIMEZONE` (default America/New_York) for schedules/pick; includes timezone in responses/UI; tzdata added for Windows.
 - Default lookback: analysis/pick windows now default to 45 days (configurable via `DEFAULT_LOOKBACK_DAYS`; was 60) to emphasize recency while keeping enough sample.
 - Lean weighting refresh: single modest recency factor with capped streaks, flat home bonus, reduced home/road split weight, higher xG impact, lower GA weight, HDF removed, higher goalie edge weight, special teams kept modest.
@@ -20,6 +21,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`; unlock now enforced by valid token; remove buttons visible; persists when volume mounted on data/cache.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.
 - UI: modal popup for Today’s “Analyze” that shows matchup summary/reasons/EV/teams; Today and modal calls default to force_refresh for fresher data.
+- Injuries: Rotowire JSON injury feed with TTL cache; `/nhl/injuries` endpoint; matchup responses include injuries (per team) + source/timestamp; UI card shows injuries. Injury entries now include `important` flag (softer thresholds: skater gp>=5 & toi>12; goalie gp/starts>=5 & sv%>=0.895) when stats provided.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
 - Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
 
@@ -60,6 +62,8 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 13) Deploy: move to paid Render to avoid autosleep once ready.
 14) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
 15) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals/admin console/overrides) and add UI usage notes.
+16) Hook player stats into injury importance: pass skater/goalie stats into injury loader so `important` flags reflect real usage; highlight in UI.
+17) Scheduled snapshots only: ensure only the noon job/admin endpoint creates matchup snapshots; pre-noon analyses always fresh, post-noon always from the common snapshot time.
 
 ## Advanced stats roadmap (tiered weighting)
 - Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.
