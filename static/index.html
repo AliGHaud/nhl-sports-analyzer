@@ -77,6 +77,11 @@
       <button id="go">Analyze Matchup</button>
       <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
       <button id="pickBtn" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Pick of the Day</button>
+      <button id="snapshotBtn" class="toggle" title="Admin: trigger today's snapshot">Run Snapshot</button>
+    </div>
+    <div class="row" style="margin-top:8px; gap:8px;">
+      <label for="adminToken">Admin token</label>
+      <input id="adminToken" type="password" placeholder="x-admin-token" style="max-width:240px;">
     </div>
   </div>
 
@@ -147,6 +152,8 @@
     const refreshTodayBtn = document.getElementById('refreshToday');
     const goTeamBtn = document.getElementById('goTeam');
     const pickBtn = document.getElementById('pickBtn');
+    const snapshotBtn = document.getElementById('snapshotBtn');
+    const adminTokenInput = document.getElementById('adminToken');
     const pickCard = document.getElementById('pickCard');
     const toggleRawBtn = document.getElementById('toggleRaw');
     const rawContainer = document.getElementById('raw');
@@ -581,6 +588,38 @@
       rawContainer.style.display = open ? 'none' : 'block';
       toggleRawBtn.textContent = open ? 'Show' : 'Hide';
     });
+    snapshotBtn.addEventListener('click', async () => {
+      const token = adminTokenInput.value || localStorage.getItem('adminToken');
+      if (!token) {
+        alert('Enter admin token to run snapshot.');
+        return;
+      }
+      localStorage.setItem('adminToken', token);
+      snapshotBtn.textContent = 'Running...';
+      snapshotBtn.disabled = true;
+      try {
+        const res = await fetch('/nhl/snapshot_today', {
+          method: 'POST',
+          headers: { 'x-admin-token': token },
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          alert(`Snapshot failed: ${body.detail || res.statusText}`);
+        } else {
+          alert('Snapshot completed.');
+        }
+      } catch (err) {
+        alert('Snapshot error: ' + err);
+      } finally {
+        snapshotBtn.textContent = 'Run Snapshot';
+        snapshotBtn.disabled = false;
+      }
+    });
+    // preload token if stored
+    try {
+      const savedToken = localStorage.getItem('adminToken');
+      if (savedToken) adminTokenInput.value = savedToken;
+    } catch (e) {}
     modalClose.addEventListener('click', () => { modalBackdrop.style.display = 'none'; });
     modalBackdrop.addEventListener('click', (e) => {
       if (e.target === modalBackdrop) modalBackdrop.style.display = 'none';
