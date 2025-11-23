@@ -1298,7 +1298,8 @@ def update_overrides(payload: OverridePayload, request: Request):
 
 @app.get("/nhl/injuries")
 def nhl_injuries(force_refresh: bool = Query(False, description="Refresh cached injuries")):
-    injuries = load_injuries_rotowire(force_refresh=force_refresh)
+    player_stats = load_moneypuck_player_stats(force_refresh=force_refresh)
+    injuries = load_injuries_rotowire(force_refresh=force_refresh, player_stats=player_stats)
     if not injuries:
         raise HTTPException(status_code=502, detail="Injury feed unavailable.")
     return injuries
