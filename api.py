@@ -12,6 +12,7 @@ import os
 import json
 import threading
 import time as time_module
+import shutil
 from datetime import date, datetime, timedelta, time, timezone
 from pathlib import Path
 from typing import Optional, Tuple
@@ -79,6 +80,28 @@ API_ADMIN_TOKEN = os.getenv("API_ADMIN_TOKEN")
 MANUAL_OVERRIDES_PATH = CACHE_DIR / "manual_overrides.json"
 SNAPSHOT_DIR = Path(os.getenv("SNAPSHOT_DIR", CACHE_DIR / "snapshots"))
 AUTO_SNAPSHOT_ENABLED = os.getenv("AUTO_SNAPSHOT_ENABLED", "true").lower() == "true"
+
+
+def _cleanup_daily_cache():
+    """
+    On startup, clear projected goalie cache and today's matchup snapshots.
+    Prevents stale projected starters/snapshots after redeploys.
+    """
+    try:
+        today = date.today().isoformat()
+        for path in CACHE_DIR.glob("projected_goalies_*.json"):
+            try:
+                path.unlink()
+            except Exception:
+                continue
+        snap_dir = CACHE_DIR / "snapshots" / "matchups" / today
+        if snap_dir.exists():
+            shutil.rmtree(snap_dir, ignore_errors=True)
+    except Exception:
+        logger.warning("Cache cleanup skipped (non-fatal).")
+
+
+_cleanup_daily_cache()
 
 
 # ---------- Helpers ----------
