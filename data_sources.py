@@ -113,7 +113,8 @@ def _write_cache(cache_path, data):
 
 def _read_text(url: str, timeout: int = 10):
     try:
-        resp = requests.get(url, timeout=timeout)
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; injury-fetch/1.0)"}
+        resp = requests.get(url, timeout=timeout, headers=headers)
         resp.raise_for_status()
         return resp.text
     except RequestException:
@@ -864,7 +865,7 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
 
     text = _read_text(INJURY_URL)
     if text is None:
-        return None
+        return _read_cache(cache_path, ttl_seconds=None)
     try:
         data = json.loads(text)
         body = data.get("body") or data
