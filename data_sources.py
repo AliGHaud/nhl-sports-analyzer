@@ -59,6 +59,8 @@ ALIAS_MAP = {
     "LA": "LAK",
     "TB": "TBL",
     "SJ": "SJS",
+    "SAN": "SJS",
+    "MON": "MTL",
     "LV": "VGK",
 }
 
