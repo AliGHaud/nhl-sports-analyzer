@@ -879,7 +879,13 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
         return cached
     try:
         data = json.loads(text)
-        body = data.get("body") or data
+        if isinstance(data, dict):
+            body = data.get("body") or data.get("items") or []
+        elif isinstance(data, list):
+            body = data
+        else:
+            logger.error("Unexpected injury payload type: %s", type(data))
+            return _read_cache(cache_path, ttl_seconds=None)
         normalized = []
         for entry in body:
             norm = _normalize_injury_entry(entry, player_stats=player_stats)
