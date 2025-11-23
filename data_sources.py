@@ -1116,49 +1116,55 @@ def load_moneypuck_goalie_stats(force_refresh: bool = False) -> dict:
     reader = csv.DictReader(StringIO(text))
     for row in reader:
         try:
+            if (row.get("position") or "").upper() != "G":
+                continue
+            if (row.get("situation") or "").lower() != "all":
+                continue
             name = row.get("name") or row.get("player")
         except Exception:
             continue
         if not name:
             continue
         name_norm = _normalize_name_key(name)
-        games_played = _get_float(row, ["games_played", "gamesPlayed"])
-        icetime = _get_float(row, ["icetime", "iceTime", "minutesPlayed"])
-        try:
-            toi_per_game = (icetime / games_played) if icetime and games_played else None
-        except Exception:
-            toi_per_game = None
+        games_played = _get_float(row, ["games_played"])
+        icetime = _get_float(row, ["icetime"])
+        xg = _get_float(row, ["xGoals"])
+        goals = _get_float(row, ["goals"])
+        shots = _get_float(row, ["ongoal"])
 
-        gsax = _get_float(
-            row,
-            [
-                "goalsSavedAboveExpected",
-                "gsax",
-                "goals_saved_above_expected",
-                "goalsSavedAboveAverage",
-            ],
-        )
-        gsax_per60 = _get_float(
-            row,
-            [
-                "goalsSavedAboveExpectedPer60",
-                "gsaxPer60",
-                "goals_saved_above_expected_per60",
-            ],
-        )
-        if gsax_per60 is None and gsax is not None and icetime:
+        save_pct = None
+        if shots and goals is not None:
+            try:
+                save_pct = 1 - (goals / shots)
+            except Exception:
+                save_pct = None
+
+        gsax = None
+        if xg is not None and goals is not None:
+            try:
+                gsax = xg - goals
+            except Exception:
+                gsax = None
+
+        gsax_per60 = None
+        if gsax is not None and icetime:
             try:
                 gsax_per60 = (gsax / icetime) * 60.0
             except Exception:
                 gsax_per60 = None
 
+        try:
+            toi_per_game = (icetime / games_played) if icetime and games_played else None
+        except Exception:
+            toi_per_game = None
+
         goalies[name_norm] = {
             "name": name,
-            "save_pct": _get_float(row, ["savePercentage", "savePct"]),
+            "save_pct": save_pct,
             "gsax": gsax,
             "gsax_per60": gsax_per60,
             "games_played": games_played,
-            "games_started": _get_float(row, ["gamesStarted", "starts"]),
+            "games_started": None,  # not provided in this CSV
             "icetime": icetime,
             "toi_per_game": toi_per_game,
         }
