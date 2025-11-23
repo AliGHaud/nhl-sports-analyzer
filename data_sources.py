@@ -814,7 +814,7 @@ def _is_important_injury(entry: dict, player_stats: Optional[dict] = None) -> bo
     Determine if an injured player is a key contributor based on usage/performance.
     Option A thresholds:
     - Skater: games_played >= 5 and toi_per_game > 12
-    - Goalie: starts (or games_played) >= 5 and save_pct >= 0.895
+    - Goalie: starts (or games_played) >= 5 and save_pct >= 0.895 (or save_pct missing but games threshold met)
     Missing stats => False.
     """
     if not player_stats:
@@ -834,7 +834,9 @@ def _is_important_injury(entry: dict, player_stats: Optional[dict] = None) -> bo
     # Option A thresholds
     if is_goalie:
         save_pct = stats.get("save_pct")
-        return games >= 5 and save_pct is not None and save_pct >= 0.895
+        if save_pct is None:
+            return games >= 5
+        return games >= 5 and save_pct >= 0.895
     toi = stats.get("toi_per_game")
     return games >= 5 and toi is not None and toi > 12
 
@@ -905,6 +907,76 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
     except Exception as e:
         logger.exception("Injury fetch parse failed: %s", e)
         return _read_cache(cache_path, ttl_seconds=None)
+
+
+def load_moneypuck_player_stats(force_refresh: bool = False) -> dict:
+    """
+    Load MoneyPuck player season summaries (skaters + goalies) and return a dict keyed by player name.
+    Fields: games_played, toi_per_game (minutes), is_goalie, save_pct (goalies only, may be None).
+    """
+    season = _current_season_slug()
+    players = {}
+
+    def _add_player(row, is_goalie=False):
+        try:
+            name = row.get("name")
+            games = row.get("games_played")
+            icetime = row.get("icetime")
+            try:
+                games = float(games) if games not in (None, "") else None
+            except (TypeError, ValueError):
+                games = None
+            try:
+                icetime = float(icetime) if icetime not in (None, "") else None
+            except (TypeError, ValueError):
+                icetime = None
+            toi_pg = (icetime / games) if games and icetime else None
+            save_pct = None
+            if is_goalie:
+                sv = row.get("savePercentage")
+                if sv not in (None, ""):
+                    try:
+                        save_pct = float(sv)
+                    except (TypeError, ValueError):
+                        save_pct = None
+            if not name or games is None:
+                return
+            players[name] = {
+                "games_played": games,
+                "toi_per_game": toi_pg,
+                "is_goalie": is_goalie,
+                "save_pct": save_pct,
+            }
+        except Exception:
+            return
+
+    # Skaters
+    skater_url = f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{season}/regular/skaters.csv"
+    skater_text = _fetch_csv_cached(
+        skater_url,
+        cache_name=f"moneypuck_players_skaters_{season}.csv",
+        ttl_seconds=MONEYPUCK_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if skater_text:
+        reader = csv.DictReader(StringIO(skater_text))
+        for row in reader:
+            _add_player(row, is_goalie=False)
+
+    # Goalies
+    goalie_url = f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{season}/regular/goalies.csv"
+    goalie_text = _fetch_csv_cached(
+        goalie_url,
+        cache_name=f"moneypuck_players_goalies_{season}.csv",
+        ttl_seconds=MONEYPUCK_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if goalie_text:
+        reader = csv.DictReader(StringIO(goalie_text))
+        for row in reader:
+            _add_player(row, is_goalie=True)
+
+    return players
 
 
 def _safe_float(val):

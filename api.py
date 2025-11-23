@@ -31,6 +31,7 @@ from data_sources import (
     read_pick_cache,
     write_pick_cache,
     load_injuries_rotowire,
+    load_moneypuck_player_stats,
     get_probable_goalie,
     get_team_adv_stats,
     load_nhl_team_stats,
@@ -229,6 +230,7 @@ def _snapshot_all_matchups_for_date(
     force_refresh: bool = False,
 ) -> dict:
     """Compute and write snapshots for all matchups on a given date."""
+    player_stats = load_moneypuck_player_stats(force_refresh=force_refresh)
     schedule = load_schedule_for_date(date_str, force_refresh=force_refresh)
     now = _now_in_zone()
     end_dt = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -236,7 +238,7 @@ def _snapshot_all_matchups_for_date(
     start_str = start_dt.isoformat()
     end_str = end_dt.isoformat()
 
-    injuries_blob = _injuries_by_team(force_refresh=force_refresh)
+    injuries_blob = _injuries_by_team(force_refresh=force_refresh, player_stats=player_stats)
     injuries_by_team = (injuries_blob or {}).get("items") or {}
     injuries_meta = {
         "source": (injuries_blob or {}).get("source"),
@@ -903,9 +905,11 @@ def nhl_matchup(
         )
 
     injuries = None
+    player_stats = None
     if include_injuries:
         try:
-            injuries = _injuries_by_team(force_refresh=force_refresh)
+            player_stats = load_moneypuck_player_stats(force_refresh=False)
+            injuries = _injuries_by_team(force_refresh=force_refresh, player_stats=player_stats)
         except Exception:
             injuries = None
 
