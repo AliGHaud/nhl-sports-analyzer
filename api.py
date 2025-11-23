@@ -236,6 +236,13 @@ def _snapshot_all_matchups_for_date(
     start_str = start_dt.isoformat()
     end_str = end_dt.isoformat()
 
+    injuries_blob = _injuries_by_team(force_refresh=force_refresh)
+    injuries_by_team = (injuries_blob or {}).get("items") or {}
+    injuries_meta = {
+        "source": (injuries_blob or {}).get("source"),
+        "fetched_at": (injuries_blob or {}).get("fetched_at"),
+    }
+
     if not schedule:
         return {
             "date": date_str,
@@ -255,7 +262,16 @@ def _snapshot_all_matchups_for_date(
         home = g["home_team"]
         away = g["away_team"]
         try:
-            home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
+            home_inj_list = injuries_by_team.get(home)
+            away_inj_list = injuries_by_team.get(away)
+            home_score, away_score, reasons = _lean_scores(
+                home,
+                away,
+                games,
+                force_refresh=force_refresh,
+                injuries_home=home_inj_list,
+                injuries_away=away_inj_list,
+            )
         except Exception:
             continue
 
@@ -283,6 +299,7 @@ def _snapshot_all_matchups_for_date(
                 "end_date": end_str,
                 "force_refresh": force_refresh,
                 "use_snapshot": True,
+                "include_injuries": True,
             },
             "side": {
                 "home_score": home_score,
@@ -298,6 +315,12 @@ def _snapshot_all_matchups_for_date(
             },
             "computed_at": now.isoformat(),
             "snapshot_used": True,
+        }
+        response["injuries"] = {
+            "home": injuries_by_team.get(home),
+            "away": injuries_by_team.get(away),
+            "source": injuries_meta.get("source"),
+            "fetched_at": injuries_meta.get("fetched_at"),
         }
         try:
             _write_matchup_snapshot(end_str, home, away, response)
@@ -340,7 +363,65 @@ def _run_daily_snapshot_once(date_str: str, lookback_days: int = DEFAULT_LOOKBAC
         return None
 
 
-def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = False) -> Tuple[float, float, dict]:
+def _injury_penalty(entries):
+    """
+    Return (penalty, reasons) given a list of injury entries.
+    Uses importance flag + position to scale.
+    """
+    if not entries:
+        return 0.0, []
+
+    penalty = 0.0
+    reasons = []
+    important_goalie = False
+    important_skaters = 0
+    other_skaters = 0
+
+    for item in entries:
+        pos = (item.get("position") or "").upper()
+        status = (item.get("status") or "").lower()
+        important = bool(item.get("important"))
+
+        # Apply only to meaningful absences; treat out/IR/day-to-day/suspension as impacting
+        if status and all(k not in status for k in ["out", "ir", "day", "susp", "injured"]):
+            continue
+
+        if important:
+            if pos == "G":
+                penalty += 0.6
+                important_goalie = True
+            else:
+                penalty += 0.25
+                important_skaters += 1
+        else:
+            penalty += 0.1
+            if pos == "G":
+                # non-important goalie: light bump
+                reasons.append(f"Depth goalie out: {item.get('player')}")
+            else:
+                other_skaters += 1
+
+    # Cap to avoid runaway
+    penalty = min(penalty, 1.2)
+
+    if important_goalie:
+        reasons.append("Missing starting goalie")
+    if important_skaters:
+        reasons.append(f"{important_skaters} key skater(s) out")
+    elif other_skaters:
+        reasons.append(f"{other_skaters} depth skater(s) out")
+
+    return penalty, reasons
+
+
+def _lean_scores(
+    home_team: str,
+    away_team: str,
+    games,
+    force_refresh: bool = False,
+    injuries_home=None,
+    injuries_away=None,
+) -> Tuple[float, float, dict]:
     """Pure version of the lean logic: returns scores + reasons."""
     today = _now_in_zone().date()
     home_profile = get_team_profile(home_team, games, today=today)
@@ -822,7 +903,16 @@ def nhl_matchup(
         )
 
     try:
-        home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
+        home_inj_list = injuries["items"].get(home) if injuries and injuries.get("items") else None
+        away_inj_list = injuries["items"].get(away) if injuries and injuries.get("items") else None
+        home_score, away_score, reasons = _lean_scores(
+            home,
+            away,
+            games,
+            force_refresh=force_refresh,
+            injuries_home=home_inj_list,
+            injuries_away=away_inj_list,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
