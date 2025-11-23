@@ -10,6 +10,8 @@ Endpoints:
 import logging
 import os
 import json
+import threading
+import time as time_module
 from datetime import date, datetime, timedelta, time, timezone
 from pathlib import Path
 from typing import Optional, Tuple
@@ -71,6 +73,7 @@ DEFAULT_LOOKBACK_DAYS = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "45"))
 API_ADMIN_TOKEN = os.getenv("API_ADMIN_TOKEN")
 MANUAL_OVERRIDES_PATH = CACHE_DIR / "manual_overrides.json"
 SNAPSHOT_DIR = Path(os.getenv("SNAPSHOT_DIR", CACHE_DIR / "snapshots"))
+AUTO_SNAPSHOT_ENABLED = os.getenv("AUTO_SNAPSHOT_ENABLED", "true").lower() == "true"
 
 
 # ---------- Helpers ----------
@@ -180,6 +183,144 @@ def _write_matchup_snapshot(date_str: str, home: str, away: str, data: dict) -> 
             json.dump(data, f)
     except Exception:
         pass
+
+
+def _read_pick_snapshot(date_str: str) -> Optional[dict]:
+    path = SNAPSHOT_DIR / "pick" / f"{date_str}.json"
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_pick_snapshot(date_str: str, data: dict) -> None:
+    path = SNAPSHOT_DIR / "pick" / f"{date_str}.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _snapshot_all_matchups_for_date(
+    date_str: str,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    force_refresh: bool = False,
+) -> dict:
+    """Compute and write snapshots for all matchups on a given date."""
+    schedule = load_schedule_for_date(date_str, force_refresh=force_refresh)
+    now = _now_in_zone()
+    end_dt = datetime.strptime(date_str, "%Y-%m-%d").date()
+    start_dt = end_dt - timedelta(days=lookback_days)
+    start_str = start_dt.isoformat()
+    end_str = end_dt.isoformat()
+
+    if not schedule:
+        return {
+            "date": date_str,
+            "games": [],
+            "computed_at": now.isoformat(),
+            "status": "no_schedule",
+        }
+
+    try:
+        games = load_games_from_espn_date_range(start_str, end_str, force_refresh=force_refresh)
+    except Exception as e:
+        logger.exception("Snapshot: data fetch failed for %s-%s | %s", start_str, end_str, e)
+        raise
+
+    results = []
+    for g in schedule:
+        home = g["home_team"]
+        away = g["away_team"]
+        try:
+            home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
+        except Exception:
+            continue
+
+        model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score)
+        ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
+
+        diff = home_score - away_score
+        if diff > 1.5:
+            side_lean = f"{home} ML (strong lean)"
+        elif diff > 0.5:
+            side_lean = f"{home} ML (slight lean)"
+        elif diff < -1.5:
+            side_lean = f"{away} ML (strong lean)"
+        elif diff < -0.5:
+            side_lean = f"{away} ML (slight lean)"
+        else:
+            side_lean = "No clear edge"
+
+        # Build response payload identical to /nhl/matchup with snapshot flags
+        response = {
+            "params": {
+                "home": home,
+                "away": away,
+                "start_date": start_str,
+                "end_date": end_str,
+                "force_refresh": force_refresh,
+                "use_snapshot": True,
+            },
+            "side": {
+                "home_score": home_score,
+                "away_score": away_score,
+                "lean": side_lean,
+                "reasons": reasons,
+            },
+            "model_prob": {"home": model_home_prob, "away": model_away_prob},
+            "ev": ev,
+            "profiles": {
+                "home": _profile_summary(get_team_profile(home, games, today=end_dt)),
+                "away": _profile_summary(get_team_profile(away, games, today=end_dt)),
+            },
+            "computed_at": now.isoformat(),
+            "snapshot_used": True,
+        }
+        try:
+            _write_matchup_snapshot(end_str, home, away, response)
+        except Exception:
+            pass
+        results.append(response)
+
+    return {
+        "date": date_str,
+        "computed_at": now.isoformat(),
+        "games": results,
+        "status": "ok",
+        "force_refresh": force_refresh,
+        "lookback_days": lookback_days,
+    }
+
+
+def _run_daily_snapshot_once(date_str: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS):
+    """
+    Internal: compute matchup snapshots for the date and POTD (observing gate time).
+    """
+    try:
+        logger.info("[AUTO_SNAPSHOT] Starting snapshot for %s", date_str)
+        snapshot = _snapshot_all_matchups_for_date(date_str, lookback_days=lookback_days, force_refresh=False)
+        # Respect pick gate timing: only compute if now past gate
+        now = _now_in_zone()
+        gate = time(PICK_GATE_HOUR, PICK_GATE_MINUTE)
+        pick_result = None
+        if now.time() >= gate:
+            try:
+                pick_result = nhl_pick(lookback_days=lookback_days, force_refresh=False, ignore_pick_gate=False, cache=True)
+            except Exception:
+                logger.exception("[AUTO_SNAPSHOT] Failed to compute POTD snapshot for %s", date_str)
+        else:
+            logger.info("[AUTO_SNAPSHOT] Skipping POTD; gate not reached (gate=%s)", gate)
+        logger.info("[AUTO_SNAPSHOT] Completed snapshot for %s | games=%s", date_str, len(snapshot.get("games", [])))
+        return {"matchups": snapshot, "pick": pick_result}
+    except Exception:
+        logger.exception("[AUTO_SNAPSHOT] Unexpected failure for %s", date_str)
+        return None
 
 
 def _lean_scores(home_team: str, away_team: str, games, force_refresh: bool = False) -> Tuple[float, float, dict]:
@@ -817,6 +958,11 @@ def nhl_pick(
         if cached:
             cached["cached"] = True
             return cached
+        snap = _read_pick_snapshot(end_str)
+        if snap:
+            snap["cached"] = True
+            snap["snapshot_used"] = True
+            return snap
 
     if not ignore_pick_gate and now.time() < pick_gate:
         return {
@@ -898,7 +1044,67 @@ def nhl_pick(
             write_pick_cache(end_str, result)
         except Exception:
             pass
+        try:
+            result_with_flag = dict(result)
+            result_with_flag["snapshot_used"] = True
+            _write_pick_snapshot(end_str, result_with_flag)
+        except Exception:
+            pass
     return result
+
+
+@app.post("/nhl/snapshot_today")
+def snapshot_today(
+    request: Request,
+    lookback_days: int = Query(DEFAULT_LOOKBACK_DAYS, ge=7, le=200),
+    force_refresh: bool = Query(False),
+):
+    """
+    Admin: compute snapshots for all today's matchups and POTD. Intended to be called once daily (e.g., noon).
+    """
+    _require_admin(request)
+    today = _now_in_zone().date().isoformat()
+    snapshot = _snapshot_all_matchups_for_date(today, lookback_days=lookback_days, force_refresh=force_refresh)
+    # compute pick with cache + snapshot write
+    pick = nhl_pick(lookback_days=lookback_days, force_refresh=force_refresh, ignore_pick_gate=True, cache=True)
+    return {
+        "date": today,
+        "matchups": snapshot,
+        "pick": pick,
+    }
+
+
+# ---------- Background auto-snapshot (runs daily after gate) ----------
+_AUTO_SNAPSHOT_LAST_DATE = None
+
+
+def _auto_snapshot_loop():
+    global _AUTO_SNAPSHOT_LAST_DATE
+    while True:
+        try:
+            now = _now_in_zone()
+            gate = time(PICK_GATE_HOUR, PICK_GATE_MINUTE)
+            today = now.date()
+            if _AUTO_SNAPSHOT_LAST_DATE != today and now.time() >= gate:
+                _run_daily_snapshot_once(today.isoformat(), lookback_days=DEFAULT_LOOKBACK_DAYS)
+                _AUTO_SNAPSHOT_LAST_DATE = today
+            time_to_sleep = 60  # check roughly every minute
+            time_module.sleep(time_to_sleep)
+        except Exception:
+            logger.exception("[AUTO_SNAPSHOT] Loop failure; will retry")
+            try:
+                time_module.sleep(60)
+            except Exception:
+                pass
+
+
+if AUTO_SNAPSHOT_ENABLED:
+    try:
+        t = threading.Thread(target=_auto_snapshot_loop, name="auto-snapshot", daemon=True)
+        t.start()
+        logger.info("[AUTO_SNAPSHOT] Background loop started (gate %02d:%02d)", PICK_GATE_HOUR, PICK_GATE_MINUTE)
+    except Exception:
+        logger.exception("[AUTO_SNAPSHOT] Failed to start background loop")
 
 
 @app.get("/nhl/stats")
