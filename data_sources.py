@@ -4,6 +4,7 @@
 import csv
 import os
 import json
+import re
 from io import StringIO
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -35,6 +36,16 @@ INJURY_URL = os.getenv(
 INJURY_TTL_SECONDS = 4 * 3600  # 4 hours
 
 logger = logging.getLogger("data_sources")
+
+
+def _normalize_name_key(name: str) -> str:
+    """Normalize player name for matching across sources."""
+    if not name:
+        return ""
+    key = name.lower()
+    key = re.sub(r"[.\-']", "", key)
+    key = re.sub(r"\s+", " ", key).strip()
+    return key
 
 # Normalize ESPN abbreviations to our 3-letter set
 ALIAS_MAP = {
@@ -822,7 +833,7 @@ def _is_important_injury(entry: dict, player_stats: Optional[dict] = None) -> bo
     player = entry.get("player")
     if not player:
         return False
-    stats = player_stats.get(player)
+    stats = player_stats.get(_normalize_name_key(player))
     if not stats:
         return False
 
@@ -941,7 +952,8 @@ def load_moneypuck_player_stats(force_refresh: bool = False) -> dict:
                         save_pct = None
             if not name or games is None:
                 return
-            players[name] = {
+            key = _normalize_name_key(name)
+            players[key] = {
                 "games_played": games,
                 "toi_per_game": toi_pg,
                 "is_goalie": is_goalie,
