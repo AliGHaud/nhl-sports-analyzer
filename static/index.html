@@ -188,6 +188,9 @@
 
     function renderSummary(data, targetEl = summaryEl) {
       const { params, side } = data;
+      const model = data.model_prob || {};
+      const homeProb = model.home === undefined || model.home === null ? '-' : `${fmt(model.home * 100)}%`;
+      const awayProb = model.away === undefined || model.away === null ? '-' : `${fmt(model.away * 100)}%`;
       const headline = `${params.away} @ ${params.home}`;
       targetEl.innerHTML = `
         <div class="row" style="justify-content: space-between; align-items: center;">
@@ -200,6 +203,10 @@
         <div style="margin-top:12px;" class="row">
           <div class="pill"><strong>${params.home}</strong> score ${fmt(side.home_score)}</div>
           <div class="pill"><strong>${params.away}</strong> score ${fmt(side.away_score)}</div>
+        </div>
+        <div style="margin-top:10px;" class="row">
+          <div class="pill"><strong>Model prob ${params.home}:</strong> ${homeProb}</div>
+          <div class="pill"><strong>Model prob ${params.away}:</strong> ${awayProb}</div>
         </div>
       `;
       targetEl.style.display = 'block';

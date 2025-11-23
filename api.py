@@ -613,6 +613,10 @@ def nhl_matchup(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Always expose model win probabilities, even if odds/EV are unavailable.
+    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score)
+    model_probs = {"home": model_home_prob, "away": model_away_prob}
+
     ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
 
     diff = home_score - away_score
@@ -642,6 +646,7 @@ def nhl_matchup(
             "lean": side_lean,
             "reasons": reasons,
         },
+        "model_prob": model_probs,
         "ev": ev,
         "profiles": {
             "home": _profile_summary(home_profile),
