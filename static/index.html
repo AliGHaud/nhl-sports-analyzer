@@ -562,7 +562,10 @@
         renderReasons(body.side, modalReasons);
         renderEV(body.ev, body.params, modalEv);
         if (body.injuries) {
-          renderInjuries(body, modalReasons); // reuse reasons column for space
+          const injDiv = document.createElement('div');
+          injDiv.style.marginTop = '12px';
+          modalReasons.appendChild(injDiv);
+          renderInjuries(body, injDiv);
         }
         renderTeams(body.profiles, modalTeams);
       } catch (err) {
