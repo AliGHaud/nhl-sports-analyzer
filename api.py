@@ -755,8 +755,9 @@ def _lean_scores(
         elif goalie_score < 0:
             away_score += abs(goalie_score)
             reasons_away.append("Goalie edge (scaled/capped)")
-    except Exception:
-        goalie_meta = {"error": "goalie_rating_failed"}
+    except Exception as e:
+        logger.exception("Goalie rating failed for %s vs %s", home_team, away_team)
+        goalie_meta = {"error": "goalie_rating_failed", "detail": str(e)}
 
     return home_score, away_score, {
         "home_reasons": reasons_home,
