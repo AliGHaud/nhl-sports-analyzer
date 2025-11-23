@@ -449,8 +449,8 @@ GOALIE_LEAGUE_AVG_SV = 0.905  # conservative league baseline
 GOALIE_SHRINK_STARTS = 10.0
 GOALIE_SAMPLE_FLOOR_STARTS = 8.0
 GOALIE_RATING_CAP = 0.03  # cap contribution in sv% points
-GOALIE_SCORE_K = 25.0  # maps rating delta to score (0.02 -> 0.5)
-GOALIE_SCORE_CAP = 0.8
+GOALIE_SCORE_K = 20.0  # maps rating delta to score (0.02 -> 0.4)
+GOALIE_SCORE_CAP = 0.6
 GOALIE_GSAX_PER60_WEIGHT = 0.008  # converts gsax/60 to sv%-like points
 GOALIE_GSAX_PER60_CAP = 1.5
 GOALIE_B2B_RATING_PENALTY = 0.006  # ~3-4% win-prob swing when scaled
@@ -658,6 +658,7 @@ def _lean_scores(
     # Flat home-ice bonus
     home_score += 0.75
     reasons_home.append("Home-ice advantage")
+    home_score -= 0.25  # adjust to net +0.50 total bonus
 
     # Home/Road splits
     def pct(stats):
@@ -684,10 +685,10 @@ def _lean_scores(
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 0.5
+        home_score += 0.3
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 0.5
+        away_score += 0.3
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
     # Advanced stats edge (xG/HDCF) from MoneyPuck if available
@@ -696,10 +697,10 @@ def _lean_scores(
     if xgf_pct_home is not None and xgf_pct_away is not None:
         delta = xgf_pct_home - xgf_pct_away
         if delta >= 3.0:
-            home_score += 1.0
+            home_score += 0.7
             reasons_home.append("Better xG share (season-to-date)")
         elif delta <= -3.0:
-            away_score += 1.0
+            away_score += 0.7
             reasons_away.append("Better xG share (season-to-date)")
 
     # Special teams edge (PP/PK) if meaningful
@@ -713,10 +714,10 @@ def _lean_scores(
         net_away = (pp_away or 0) - (100 - (pk_away or 0))
         delta = net_home - net_away
         if delta >= 5:
-            home_score += 0.3
+            home_score += 0.2
             reasons_home.append("Special teams edge")
         elif delta <= -5:
-            away_score += 0.3
+            away_score += 0.2
             reasons_away.append("Special teams edge")
 
     # Rest / back-to-back
@@ -733,10 +734,10 @@ def _lean_scores(
     if home_days is not None and away_days is not None:
         diff = home_days - away_days
         if diff >= 2:
-            home_score += 0.4
+            home_score += 0.25
             reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
         elif diff <= -2:
-            away_score += 0.4
+            away_score += 0.25
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
     # Goalie edge (continuous + capped)
