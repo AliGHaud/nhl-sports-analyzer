@@ -671,8 +671,11 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: 
     for group in athletes:
         if not isinstance(group, dict):
             continue
-        group_pos = (group.get("position", {}) or {}).get("abbreviation")
-        items = group.get("items", [])
+        try:
+            group_pos = (group.get("position", {}) or {}).get("abbreviation")
+            items = group.get("items", [])
+        except Exception:
+            continue
         # If group position missing, infer from item-level position/defaultPosition
         if group_pos != "G":
             filtered_items = []
