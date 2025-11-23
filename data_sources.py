@@ -840,7 +840,7 @@ def _normalize_injury_entry(entry: dict, player_stats: Optional[dict] = None) ->
         return {
             "team": team,
             "player": player,
-            "position": entry.get("pos"),
+            "position": entry.get("pos") or entry.get("position"),
             "injury": entry.get("injury"),
             "status": entry.get("status"),
             "return": entry.get("estReturn"),
@@ -873,6 +873,9 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
             norm = _normalize_injury_entry(entry, player_stats=player_stats)
             if norm:
                 normalized.append(norm)
+        if not normalized:
+            # do not overwrite cache with empty; fall back to last good
+            return _read_cache(cache_path, ttl_seconds=None)
         payload = {
             "source": "rotowire",
             "fetched_at": datetime.utcnow().isoformat() + "Z",
@@ -882,7 +885,7 @@ def load_injuries_rotowire(force_refresh: bool = False, player_stats: Optional[d
         _write_cache(cache_path, payload)
         return payload
     except Exception:
-        return None
+        return _read_cache(cache_path, ttl_seconds=None)
 
 
 def _safe_float(val):
