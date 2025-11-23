@@ -669,11 +669,25 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: 
 
     goalies = []
     for group in athletes:
-        try:
-            if group.get("position", {}).get("abbreviation") != "G":
+        group_pos = (group.get("position", {}) or {}).get("abbreviation")
+        items = group.get("items", [])
+        # If group position missing, infer from item-level position/defaultPosition
+        if group_pos != "G":
+            filtered_items = []
+            for g in items:
+                pos = None
+                try:
+                    pos = (g.get("position") or {}).get("abbreviation") or (g.get("defaultPosition") or {}).get("abbreviation")
+                except Exception:
+                    pos = None
+                if pos == "G":
+                    filtered_items.append(g)
+            items = filtered_items if filtered_items else items
+            if group_pos != "G" and not any(((g.get("position") or {}).get("abbreviation") == "G") or ((g.get("defaultPosition") or {}).get("abbreviation") == "G") for g in items):
+                # no goalies inferred in this group
                 continue
-        except Exception:
-            continue
+        # if group_pos == "G", keep all items
+
         for g in group.get("items", []):
             try:
                 athlete_id = str(g["id"])
