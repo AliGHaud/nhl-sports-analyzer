@@ -39,6 +39,7 @@ from data_sources import (
     load_moneypuck_team_stats,
     load_moneypuck_goalie_stats,
     load_team_roster,
+    _normalize_name_key,
 )
 from nhl_analyzer import (
     get_team_profile,
