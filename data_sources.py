@@ -699,7 +699,7 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: 
                 continue
         # if group_pos == "G", keep all items
 
-        for g in group.get("items", []):
+        for g in items:
             if not isinstance(g, dict):
                 continue
             try:
