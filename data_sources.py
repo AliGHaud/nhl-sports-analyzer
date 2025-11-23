@@ -1073,6 +1073,99 @@ def load_moneypuck_player_stats(force_refresh: bool = False) -> dict:
     return players
 
 
+def load_moneypuck_goalie_stats(force_refresh: bool = False) -> dict:
+    """
+    Load MoneyPuck goalie season summaries with GSAx and save%.
+    Returns a dict keyed by normalized player name:
+    {
+      name_norm: {
+        "name": "...",
+        "save_pct": float | None,
+        "gsax": float | None,
+        "gsax_per60": float | None,
+        "games_played": float | None,
+        "games_started": float | None,
+        "icetime": float | None,
+        "toi_per_game": float | None,
+      }
+    }
+    """
+    season = _current_season_slug()
+    url = f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{season}/regular/goalies.csv"
+    text = _fetch_csv_cached(
+        url,
+        cache_name=f"moneypuck_goalies_{season}.csv",
+        ttl_seconds=MONEYPUCK_TTL_SECONDS,
+        force_refresh=force_refresh,
+    )
+    if not text:
+        return {}
+
+    def _get_float(row, keys):
+        for k in keys:
+            val = row.get(k)
+            if val in (None, ""):
+                continue
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    goalies = {}
+    reader = csv.DictReader(StringIO(text))
+    for row in reader:
+        try:
+            name = row.get("name") or row.get("player")
+        except Exception:
+            continue
+        if not name:
+            continue
+        name_norm = _normalize_name_key(name)
+        games_played = _get_float(row, ["games_played", "gamesPlayed"])
+        icetime = _get_float(row, ["icetime", "iceTime", "minutesPlayed"])
+        try:
+            toi_per_game = (icetime / games_played) if icetime and games_played else None
+        except Exception:
+            toi_per_game = None
+
+        gsax = _get_float(
+            row,
+            [
+                "goalsSavedAboveExpected",
+                "gsax",
+                "goals_saved_above_expected",
+                "goalsSavedAboveAverage",
+            ],
+        )
+        gsax_per60 = _get_float(
+            row,
+            [
+                "goalsSavedAboveExpectedPer60",
+                "gsaxPer60",
+                "goals_saved_above_expected_per60",
+            ],
+        )
+        if gsax_per60 is None and gsax is not None and icetime:
+            try:
+                gsax_per60 = (gsax / icetime) * 60.0
+            except Exception:
+                gsax_per60 = None
+
+        goalies[name_norm] = {
+            "name": name,
+            "save_pct": _get_float(row, ["savePercentage", "savePct"]),
+            "gsax": gsax,
+            "gsax_per60": gsax_per60,
+            "games_played": games_played,
+            "games_started": _get_float(row, ["gamesStarted", "starts"]),
+            "icetime": icetime,
+            "toi_per_game": toi_per_game,
+        }
+
+    return goalies
+
+
 def _safe_float(val):
     try:
         return float(val)

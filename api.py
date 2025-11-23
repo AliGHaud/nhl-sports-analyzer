@@ -37,6 +37,7 @@ from data_sources import (
     get_team_adv_stats,
     load_nhl_team_stats,
     load_moneypuck_team_stats,
+    load_moneypuck_goalie_stats,
     load_team_roster,
 )
 from nhl_analyzer import (
@@ -311,6 +312,7 @@ def _snapshot_all_matchups_for_date(
                 "away_score": away_score,
                 "lean": side_lean,
                 "reasons": reasons,
+                "goalie": reasons.get("goalie"),
             },
             "model_prob": {"home": model_home_prob, "away": model_away_prob},
             "ev": ev,
@@ -419,6 +421,143 @@ def _injury_penalty(entries):
     return penalty, reasons
 
 
+GOALIE_LEAGUE_AVG_SV = 0.905  # conservative league baseline
+GOALIE_SHRINK_STARTS = 10.0
+GOALIE_SAMPLE_FLOOR_STARTS = 8.0
+GOALIE_RATING_CAP = 0.03  # cap contribution in sv% points
+GOALIE_SCORE_K = 25.0  # maps rating delta to score (0.02 -> 0.5)
+GOALIE_SCORE_CAP = 0.8
+GOALIE_GSAX_PER60_WEIGHT = 0.008  # converts gsax/60 to sv%-like points
+GOALIE_GSAX_PER60_CAP = 1.5
+GOALIE_B2B_RATING_PENALTY = 0.006  # ~3-4% win-prob swing when scaled
+
+
+def _start_prob_from_status(status: Optional[str]) -> float:
+    """Map projected goalie status to a start probability."""
+    if not status:
+        return 0.9
+    s = status.lower()
+    if "confirm" in s:
+        return 1.0
+    if "prob" in s or "likely" in s or "expect" in s:
+        return 0.78
+    if "question" in s or "doubt" in s:
+        return 0.55
+    if "possible" in s or "tbd" in s:
+        return 0.65
+    return 0.8
+
+
+def _regress_sv(save_pct: Optional[float], games_started: Optional[float]) -> Optional[float]:
+    """Shrink save% toward league average based on starts."""
+    if save_pct is None:
+        return None
+    gs = games_started or 0.0
+    weight = gs / (gs + GOALIE_SHRINK_STARTS) if gs >= 0 else 0.0
+    return GOALIE_LEAGUE_AVG_SV + weight * (save_pct - GOALIE_LEAGUE_AVG_SV)
+
+
+def _goalie_rating_for_team(
+    team_code: str,
+    rest_info: dict,
+    projected_goalies: Optional[dict],
+    mp_goalies: Optional[dict],
+    force_refresh: bool = False,
+):
+    """
+    Build a goalie rating offset (vs league avg) for a team.
+    Uses projected starter when available; otherwise the probable goalie from roster stats.
+    Returns (rating, reasons, detail).
+    """
+    proj_entry = None
+    if projected_goalies:
+        proj_entry = projected_goalies.get(team_code)
+    probable = get_probable_goalie(team_code, force_refresh=force_refresh, projected=projected_goalies)
+    if not probable:
+        return 0.0, ["Goalie data unavailable"], {"start_prob": 0.0}
+
+    stats = probable.get("stats") or {}
+    mp = None
+    try:
+        name_norm = probable.get("name_norm")
+        mp = mp_goalies.get(name_norm) if mp_goalies else None
+    except Exception:
+        mp = None
+
+    save_pct = (
+        (mp or {}).get("save_pct")
+        if (mp or {}).get("save_pct") is not None
+        else stats.get("save_pct")
+    )
+    games_started = (
+        stats.get("games_started")
+        or stats.get("games_played")
+        or (mp or {}).get("games_started")
+        or (mp or {}).get("games_played")
+    )
+    reg_sv = _regress_sv(save_pct, games_started)
+
+    gsax_per60 = None
+    if mp:
+        gsax_per60 = mp.get("gsax_per60")
+        if gsax_per60 is None and mp.get("gsax") is not None and mp.get("icetime"):
+            try:
+                gsax_per60 = (mp["gsax"] / mp["icetime"]) * 60.0
+            except Exception:
+                gsax_per60 = None
+    gsax_component = 0.0
+    if gsax_per60 is not None:
+        capped = max(min(gsax_per60, GOALIE_GSAX_PER60_CAP), -GOALIE_GSAX_PER60_CAP)
+        gsax_component = capped * GOALIE_GSAX_PER60_WEIGHT
+
+    rating = 0.0
+    reasons = []
+    details = {
+        "goalie": probable.get("name"),
+        "save_pct": save_pct,
+        "regressed_sv": reg_sv,
+        "games_started": games_started,
+        "gsax_per60": gsax_per60,
+        "gsax_component": gsax_component,
+        "rest_penalty": 0.0,
+    }
+
+    if reg_sv is not None:
+        rating += reg_sv - GOALIE_LEAGUE_AVG_SV
+        reasons.append(f"{probable.get('name')} regressed sv% input")
+    if gsax_component:
+        rating += gsax_component
+        reasons.append("GSAx contribution")
+
+    # Small-sample shrink
+    sample_weight = 1.0
+    if games_started is not None and games_started < GOALIE_SAMPLE_FLOOR_STARTS:
+        sample_weight = games_started / GOALIE_SAMPLE_FLOOR_STARTS
+        rating *= sample_weight
+        reasons.append("Small-sample shrink applied")
+    details["sample_weight"] = sample_weight
+
+    # Rest penalty (goalie-specific B2B)
+    if rest_info.get("is_back_to_back"):
+        rating -= GOALIE_B2B_RATING_PENALTY
+        details["rest_penalty"] = GOALIE_B2B_RATING_PENALTY
+        reasons.append("Zero-rest goalie penalty")
+
+    # Start probability blend
+    start_prob = _start_prob_from_status(proj_entry.get("status") if proj_entry else None)
+    rating *= start_prob
+    details["start_prob"] = start_prob
+    details["raw_rating_capped"] = rating
+    if start_prob < 1.0:
+        reasons.append(f"Start prob {start_prob:.0%} applied")
+
+    # Cap rating to prevent runaway impact
+    rating = max(min(rating, GOALIE_RATING_CAP), -GOALIE_RATING_CAP)
+    details["rating_capped"] = rating
+    details["projected_status"] = proj_entry.get("status") if proj_entry else None
+    return rating, reasons, details
+
+
 def _lean_scores(
     home_team: str,
     away_team: str,
@@ -434,6 +573,10 @@ def _lean_scores(
     away_profile = get_team_profile(away_team, games, today=today)
     adv_home = get_team_adv_stats(home_team, force_refresh=force_refresh) or {}
     adv_away = get_team_adv_stats(away_team, force_refresh=force_refresh) or {}
+    try:
+        mp_goalies = load_moneypuck_goalie_stats(force_refresh=force_refresh)
+    except Exception:
+        mp_goalies = {}
 
     if home_profile is None or away_profile is None:
         raise ValueError("Not enough data to build team profiles.")
@@ -562,29 +705,52 @@ def _lean_scores(
             away_score += 0.4
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
-    # Goalie edge (heuristic)
+    # Goalie edge (continuous + capped)
+    goalie_meta = {}
     try:
-        home_g = get_probable_goalie(home_team, force_refresh=force_refresh, projected=projected_goalies)
-        away_g = get_probable_goalie(away_team, force_refresh=force_refresh, projected=projected_goalies)
-    except Exception:
-        home_g = None
-        away_g = None
+        home_rating, home_g_reasons, home_goalie_meta = _goalie_rating_for_team(
+            home_team,
+            rest_home,
+            projected_goalies,
+            mp_goalies,
+            force_refresh=force_refresh,
+        )
+        away_rating, away_g_reasons, away_goalie_meta = _goalie_rating_for_team(
+            away_team,
+            rest_away,
+            projected_goalies,
+            mp_goalies,
+            force_refresh=force_refresh,
+        )
+        rating_diff = home_rating - away_rating
+        goalie_score = max(min(rating_diff * GOALIE_SCORE_K, GOALIE_SCORE_CAP), -GOALIE_SCORE_CAP)
+        goalie_meta = {
+            "home_rating": home_rating,
+            "away_rating": away_rating,
+            "rating_diff": rating_diff,
+            "score_contrib": goalie_score,
+            "home": home_goalie_meta,
+            "away": away_goalie_meta,
+        }
+        # Attach granular reasons to the appropriate side
+        if home_g_reasons:
+            reasons_home.extend([f"Goalie: {r}" for r in home_g_reasons])
+        if away_g_reasons:
+            reasons_away.extend([f"Goalie: {r}" for r in away_g_reasons])
 
-    if home_g and away_g:
-        home_sv = home_g["stats"].get("save_pct")
-        away_sv = away_g["stats"].get("save_pct")
-        if home_sv is not None and away_sv is not None:
-            delta = home_sv - away_sv
-            if delta >= 0.01:
-                home_score += 1.2
-                reasons_home.append(f"Goalie edge: {home_g['name']} higher sv%")
-            elif delta <= -0.01:
-                away_score += 1.2
-                reasons_away.append(f"Goalie edge: {away_g['name']} higher sv%")
+        if goalie_score > 0:
+            home_score += goalie_score
+            reasons_home.append("Goalie edge (scaled/capped)")
+        elif goalie_score < 0:
+            away_score += abs(goalie_score)
+            reasons_away.append("Goalie edge (scaled/capped)")
+    except Exception:
+        goalie_meta = {"error": "goalie_rating_failed"}
 
     return home_score, away_score, {
         "home_reasons": reasons_home,
         "away_reasons": reasons_away,
+        "goalie": goalie_meta,
     }
 
 
@@ -971,6 +1137,7 @@ def nhl_matchup(
             "away_score": away_score,
             "lean": side_lean,
             "reasons": reasons,
+            "goalie": reasons.get("goalie"),
         },
         "model_prob": model_probs,
         "ev": ev,
