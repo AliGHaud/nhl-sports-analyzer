@@ -669,12 +669,16 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: 
 
     goalies = []
     for group in athletes:
+        if not isinstance(group, dict):
+            continue
         group_pos = (group.get("position", {}) or {}).get("abbreviation")
         items = group.get("items", [])
         # If group position missing, infer from item-level position/defaultPosition
         if group_pos != "G":
             filtered_items = []
             for g in items:
+                if not isinstance(g, dict):
+                    continue
                 pos = None
                 try:
                     pos = (g.get("position") or {}).get("abbreviation") or (g.get("defaultPosition") or {}).get("abbreviation")
@@ -683,12 +687,21 @@ def get_probable_goalie(team_code: str, force_refresh: bool = False, projected: 
                 if pos == "G":
                     filtered_items.append(g)
             items = filtered_items if filtered_items else items
-            if group_pos != "G" and not any(((g.get("position") or {}).get("abbreviation") == "G") or ((g.get("defaultPosition") or {}).get("abbreviation") == "G") for g in items):
+            if group_pos != "G" and not any(
+                isinstance(g, dict)
+                and (
+                    (g.get("position") or {}).get("abbreviation") == "G"
+                    or (g.get("defaultPosition") or {}).get("abbreviation") == "G"
+                )
+                for g in items
+            ):
                 # no goalies inferred in this group
                 continue
         # if group_pos == "G", keep all items
 
         for g in group.get("items", []):
+            if not isinstance(g, dict):
+                continue
             try:
                 athlete_id = str(g["id"])
                 full_name = g.get("fullName") or g.get("displayName")
