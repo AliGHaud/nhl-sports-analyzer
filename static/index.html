@@ -222,9 +222,13 @@
     function renderInjuries(data, targetEl = null) {
       const container = targetEl || document.createElement('div');
       const injuries = data.injuries || {};
-      const homeList = (injuries.home || []).map(r => `<li>${r.player} (${r.position || ''}) - ${r.status || ''}${r.injury ? `, ${r.injury}` : ''}</li>`).join('') || '<li>No reported injuries</li>';
-      const awayList = (injuries.away || []).map(r => `<li>${r.player} (${r.position || ''}) - ${r.status || ''}${r.injury ? `, ${r.injury}` : ''}</li>`).join('') || '<li>No reported injuries</li>';
-      const meta = injuries.source ? `<div class="muted">Source: ${injuries.source}${injuries.fetched_at ? ` | As of ${new Date(injuries.fetched_at).toLocaleString()}` : ''}</div>` : '';
+      const filterImportant = list => (list || []).filter(r => r.important);
+      const renderList = list => list.map(r => `<li>${r.player} (${r.position || ''}) - ${r.status || ''}${r.injury ? `, ${r.injury}` : ''}</li>`).join('');
+      const homeImportant = filterImportant(injuries.home);
+      const awayImportant = filterImportant(injuries.away);
+      const homeList = renderList(homeImportant) || '<li>No key injuries</li>';
+      const awayList = renderList(awayImportant) || '<li>No key injuries</li>';
+      const meta = injuries.source ? `<div class="muted">Source: ${injuries.source}${injuries.fetched_at ? ` | As of ${new Date(injuries.fetched_at).toLocaleString()}` : ''} (showing key injuries)</div>` : '';
       container.innerHTML = `
         <h3>Injuries</h3>
         ${meta}
