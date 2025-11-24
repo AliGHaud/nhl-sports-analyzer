@@ -102,6 +102,7 @@
   </div>
 
   <div id="summary" class="card" style="display:none;"></div>
+  <div id="goalieInfo" class="card" style="display:none;"></div>
   <div class="grid grid-2">
     <div id="reasons" class="card" style="display:none;"></div>
     <div id="ev" class="card" style="display:none;"></div>
@@ -126,6 +127,7 @@
         <button id="modalClose" class="modal-close">Close</button>
       </div>
       <div id="modalSummary" class="card" style="margin-top:12px;"></div>
+      <div id="modalGoalie" class="card" style="display:none; margin-top:8px;"></div>
       <div class="grid grid-2">
         <div id="modalReasons" class="card" style="display:none;"></div>
         <div id="modalEv" class="card" style="display:none;"></div>
@@ -147,6 +149,7 @@
     const injuriesEl = document.getElementById('injuries');
     const teamsEl = document.getElementById('teams');
     const rawEl = document.getElementById('raw');
+    const goalieEl = document.getElementById('goalieInfo');
     const todayGamesEl = document.getElementById('todayGames');
     const todayMeta = document.getElementById('todayMeta');
     const refreshTodayBtn = document.getElementById('refreshToday');
@@ -163,6 +166,7 @@
     const modalBackdrop = document.getElementById('modalBackdrop');
     const modalClose = document.getElementById('modalClose');
     const modalSummary = document.getElementById('modalSummary');
+    const modalGoalie = document.getElementById('modalGoalie');
     const modalReasons = document.getElementById('modalReasons');
     const modalEv = document.getElementById('modalEv');
     const modalTeams = document.getElementById('modalTeams');
@@ -229,6 +233,37 @@
           <div class="pill"><strong>Projected ${params.home} G:</strong> ${homeGoalie}</div>
           <div class="pill"><strong>Projected ${params.away} G:</strong> ${awayGoalie}</div>
         </div>
+      `;
+      targetEl.style.display = 'block';
+    }
+
+    function renderGoalieCard(side, targetEl = goalieEl) {
+      const g = side && side.goalie;
+      if (!g || g.error) {
+        targetEl.style.display = 'none';
+        targetEl.innerHTML = '';
+        return;
+      }
+      const fmtPct = (v) => (v === null || v === undefined) ? '-' : `${(v * 100).toFixed(1)}%`;
+      const block = (label, data) => `
+        <div>
+          <strong>${label}</strong>
+          <ul>
+            <li>Rating: ${data.rating_capped ?? data.rating_diff ?? 0}</li>
+            <li>Start prob: ${data.start_prob !== undefined ? `${(data.start_prob * 100).toFixed(0)}%` : '-'}</li>
+            <li>Rest penalty: ${data.rest_penalty ?? 0}</li>
+            <li>Save%: ${fmtPct(data.save_pct)}</li>
+            <li>GSAx/60: ${data.gsax_per60 !== undefined && data.gsax_per60 !== null ? data.gsax_per60.toFixed(3) : '-'}</li>
+            <li>Status: ${data.projected_status || 'Unknown'}</li>
+          </ul>
+        </div>`;
+      targetEl.innerHTML = `
+        <h3>Goalie impact</h3>
+        <div class="grid grid-2">
+          ${block('Home', g.home || {})}
+          ${block('Away', g.away || {})}
+        </div>
+        <div class="pill" style="margin-top:8px;">Score contribution: ${g.score_contrib ?? 0}</div>
       `;
       targetEl.style.display = 'block';
     }
@@ -507,6 +542,7 @@
       summaryEl.style.display = 'none';
       reasonsEl.style.display = 'none';
       evEl.style.display = 'none';
+      goalieEl.style.display = 'none';
       injuriesEl.style.display = 'none';
       teamsEl.innerHTML = '';
       out.textContent = 'Loading...';
@@ -524,6 +560,7 @@
         }
         out.textContent = JSON.stringify(body, null, 2);
         renderSummary(body);
+        renderGoalieCard(body.side, goalieEl);
         renderReasons(body.side);
         renderEV(body.ev, body.params);
         if (body.injuries) {
@@ -545,6 +582,7 @@
 
       modalTitle.textContent = `${away} @ ${home}`;
       modalSummary.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
+      modalGoalie.style.display = 'none';
       modalReasons.style.display = 'none';
       modalEv.style.display = 'none';
       injuriesEl.style.display = 'none';
@@ -559,6 +597,7 @@
           return;
         }
         renderSummary(body, modalSummary);
+        renderGoalieCard(body.side, modalGoalie);
         renderReasons(body.side, modalReasons);
         renderEV(body.ev, body.params, modalEv);
         if (body.injuries) {
