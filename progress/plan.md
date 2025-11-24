@@ -21,6 +21,8 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Startup cache cleanup: projected goalie caches and all matchup snapshots are cleared on startup to avoid stale projections after redeploys.
 - Lean tuning: softened weights (home/xG/rest/GA/ST), temperature-scaled probabilities (1.15), and reduced goalie impact to improve calibration; CLI lean aligned with API (xG/rest/goalie/temperature).
 - Pick filters/tests: tightened pick filters (model prob floor, edge/EV thresholds, odds cap, goalie certainty, slate-based thresholds) and added pytest coverage for lean/probability softening and pick filters.
+- Auth scaffolding: added Firebase frontend wiring (Google login, ID token attachment to API calls), Firebase admin init, and `/auth/me` status endpoint; env/config placeholders ready for enforcement/gating.
+- Optional auth gating: `/nhl/pick` enforces auth/pro tier when env flags are set; matchup/team/today accept auth dependency for future gating.
 - API-Sports (optional): API-Sports Hockey fixtures/odds via `API_SPORTS_KEY` (league=57), fallback to ESPN when unset/unavailable.
 - Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`; unlock now enforced by valid token; remove buttons visible; persists when volume mounted on data/cache.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.

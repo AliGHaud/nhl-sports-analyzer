@@ -1077,7 +1077,7 @@ def list_teams():
 
 
 @app.get("/nhl/today")
-def nhl_today(force_refresh: bool = Query(False)):
+def nhl_today(force_refresh: bool = Query(False), user: Optional[dict] = Depends(current_user_optional)):
     """Return today's NHL schedule (home/away abbreviations)."""
     now = _now_in_zone()
     today = now.date().isoformat()
@@ -1150,6 +1150,7 @@ def nhl_matchup(
         True,
         description="If true, include injury lists per team (rotowire).",
     ),
+    user: Optional[dict] = Depends(current_user_optional),
     ):
     # Defaults: last 45 days to keep fetches fast and recent
     now = _now_in_zone()
@@ -1342,6 +1343,7 @@ def nhl_team(
         False,
         description="If true, bypass cached ESPN responses for this request.",
     ),
+    user: Optional[dict] = Depends(current_user_optional),
 ):
     now = _now_in_zone()
     today = now.date()
@@ -1421,7 +1423,12 @@ def nhl_pick(
         True,
         description="If true, returns cached pick for the day when available.",
     ),
+    user: Optional[dict] = Depends(current_user_optional),
 ):
+    if FIREBASE_ENFORCE_AUTH and not user:
+        raise HTTPException(status_code=401, detail="Auth required")
+    if FIREBASE_REQUIRE_PRO_FOR_PICK and not _is_pro(user):
+        raise HTTPException(status_code=403, detail="Pro tier required")
     now = _now_in_zone()
     today = now.date()
     start_dt = today - timedelta(days=lookback_days)
