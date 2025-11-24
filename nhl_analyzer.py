@@ -10,6 +10,7 @@ from data_sources import (
     load_games_from_espn_date_range,
     load_current_odds_for_matchup,
     load_schedule_for_date,  # future schedule helper
+    get_team_adv_stats,
 )
 
 # Points to the folder where this script lives (not heavily used now, but kept)
@@ -476,24 +477,13 @@ def confidence_grade(edge_pct, ev_units):
 
 def analyze_matchup_lean(home_team, away_team, games):
     """
-    Balanced lean engine for a matchup.
-
-    Uses:
-    - Last 5 / Last 10
-    - Streaks
-    - Home/Road splits
-    - High-scoring trends
-
-    Prints:
-    - Side lean (ML)
-    - Total lean (Over/Under/Neutral)
-
-    Returns:
-    - (home_score, away_score) for EV calculation later.
+    Balanced lean engine for a matchup (aligned with API weights).
     """
     today = date.today()
     home_profile = get_team_profile(home_team, games, today=today)
     away_profile = get_team_profile(away_team, games, today=today)
+    adv_home = get_team_adv_stats(home_team) or {}
+    adv_away = get_team_adv_stats(away_team) or {}
 
     if home_profile is None or away_profile is None:
         print("\n=== Balanced Lean Engine ===")
@@ -545,8 +535,8 @@ def analyze_matchup_lean(home_team, away_team, games):
                 if stype == "L" and length >= 3:
                     reasons_away.append(f"On a {length}-game losing streak")
 
-    # Flat home-ice bonus
-    home_score += 0.75
+    # Flat home-ice bonus (softened)
+    home_score += 0.25
     reasons_home.append("Home-ice advantage")
 
     # 3) Home/Road splits
@@ -570,16 +560,44 @@ def analyze_matchup_lean(home_team, away_team, games):
         elif away_road_win_pct <= 0.45:
             reasons_home.append("Away team weaker on the road")
 
-    # 5) Defensive edge (lower GA in last 10) with modest weight
+    # Defensive edge (lower GA in last 10) with modest weight
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
 
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 0.5
+        home_score += 0.2
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 0.5
+        away_score += 0.2
         reasons_away.append("Better defensive numbers (fewer goals against)")
+
+    # Advanced stats edge (xG/HDCF) from MoneyPuck if available
+    xgf_pct_home = adv_home.get("xgf_pct")
+    xgf_pct_away = adv_away.get("xgf_pct")
+    if xgf_pct_home is not None and xgf_pct_away is not None:
+        delta = xgf_pct_home - xgf_pct_away
+        if delta >= 3.0:
+            home_score += 0.55
+            reasons_home.append("Better xG share (season-to-date)")
+        elif delta <= -3.0:
+            away_score += 0.55
+            reasons_away.append("Better xG share (season-to-date)")
+
+    # Special teams edge (PP/PK) if meaningful
+    pp_home = adv_home.get("pp")
+    pk_home = adv_home.get("pk")
+    pp_away = adv_away.get("pp")
+    pk_away = adv_away.get("pk")
+    if pp_home and pk_home and pp_away and pk_away:
+        net_home = (pp_home or 0) - (100 - (pk_home or 0))
+        net_away = (pp_away or 0) - (100 - (pk_away or 0))
+        delta = net_home - net_away
+        if delta >= 5:
+            home_score += 0.15
+            reasons_home.append("Special teams edge")
+        elif delta <= -5:
+            away_score += 0.15
+            reasons_away.append("Special teams edge")
 
     # Rest / back-to-back
     rest_home = home_profile.get("rest") or {}
@@ -587,18 +605,18 @@ def analyze_matchup_lean(home_team, away_team, games):
     home_days = rest_home.get("days_since_last")
     away_days = rest_away.get("days_since_last")
     if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
-        home_score -= 0.5
+        home_score -= 0.40
         reasons_away.append("Home on back-to-back; away more rested")
     if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
-        away_score -= 0.5
+        away_score -= 0.40
         reasons_home.append("Away on back-to-back; home more rested")
     if home_days is not None and away_days is not None:
         diff = home_days - away_days
         if diff >= 2:
-            home_score += 0.4
+            home_score += 0.20
             reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
         elif diff <= -2:
-            away_score += 0.4
+            away_score += 0.20
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
     # --- Decide side lean ---
@@ -719,7 +737,7 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
             return
 
     # Model probabilities from scores
-    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score)
+    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score, temperature=1.15)
 
     # Market implied probabilities from odds
     p_home_market = implied_prob_american(home_odds)
