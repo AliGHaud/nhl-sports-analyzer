@@ -17,6 +17,8 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Pick caching: pick is cached per-day (in data/cache) and gated until configured time (default 12:00 in APP_TIMEZONE), with force_refresh to rerun.
 - MoneyPuck integration: pull team-level xG% and high-danger share from MoneyPuck CSV (per season), filter to all-situations row, scale percentages correctly, and add modest lean adjustments/reasons when deltas are meaningful.
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
+- UI: goalie impact card on main and modal views shows ratings/start prob/rest penalty/score contrib without raw JSON.
+- Startup cache cleanup: projected goalie caches and all matchup snapshots are cleared on startup to avoid stale projections after redeploys.
 - API-Sports (optional): API-Sports Hockey fixtures/odds via `API_SPORTS_KEY` (league=57), fallback to ESPN when unset/unavailable.
 - Admin overrides: `/admin` console (token-protected) to manage manual injuries/goalie overrides stored in `data/cache/manual_overrides.json`; team/roster lookups exposed via `/teams` and `/nhl/roster`; unlock now enforced by valid token; remove buttons visible; persists when volume mounted on data/cache.
 - ESPN abbreviation normalization: map 2-letter variants to 3-letter codes for schedule/odds matching.

@@ -84,17 +84,16 @@ AUTO_SNAPSHOT_ENABLED = os.getenv("AUTO_SNAPSHOT_ENABLED", "true").lower() == "t
 
 def _cleanup_daily_cache():
     """
-    On startup, clear projected goalie cache and today's matchup snapshots.
+    On startup, clear projected goalie cache and all matchup snapshots.
     Prevents stale projected starters/snapshots after redeploys.
     """
     try:
-        today = date.today().isoformat()
         for path in CACHE_DIR.glob("projected_goalies_*.json"):
             try:
                 path.unlink()
             except Exception:
                 continue
-        snap_dir = CACHE_DIR / "snapshots" / "matchups" / today
+        snap_dir = CACHE_DIR / "snapshots" / "matchups"
         if snap_dir.exists():
             shutil.rmtree(snap_dir, ignore_errors=True)
     except Exception:
