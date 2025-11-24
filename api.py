@@ -909,6 +909,15 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
         model_prob = ev["model_prob"][side_key]
         market_prob = ev["market_prob"][side_key]
         odds = ev["odds"][f"{side_key}_ml"]
+        side_reasons = []
+        try:
+            if isinstance(reasons, dict):
+                if side_key == "home":
+                    side_reasons = reasons.get("home_reasons") or []
+                else:
+                    side_reasons = reasons.get("away_reasons") or []
+        except Exception:
+            side_reasons = []
 
         # Odds cap
         if odds is None or odds < -max_juice or odds > max_juice:
@@ -943,7 +952,7 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
             "grade": grade,
             "model_prob": model_prob,
             "market_prob": market_prob,
-            "reasons": reasons["home_reasons"] if side_key == "home" else reasons["away_reasons"],
+            "reasons": side_reasons,
         }
         if best is None or candidate["ev_units"] > best["ev_units"]:
             best = candidate
