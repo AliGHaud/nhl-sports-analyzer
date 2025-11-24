@@ -434,14 +434,14 @@ def profit_on_win_for_1_unit(odds):
         return odds / 100.0
 
 
-def model_probs_from_scores(home_score, away_score):
+def model_probs_from_scores(home_score, away_score, temperature=1.15):
     """
-    Convert the home/away scores from the lean engine into probabilities
-    using a softmax. This is just a smooth way of turning scores into
-    something that sums to 1.0.
+    Convert home/away scores into probabilities via softmax with optional temperature.
+    Higher temperature (>1) softens extremes.
     """
-    eh = math.exp(home_score)
-    ea = math.exp(away_score)
+    t = max(float(temperature), 1e-6)
+    eh = math.exp(home_score / t)
+    ea = math.exp(away_score / t)
     total = eh + ea
     return eh / total, ea / total
 

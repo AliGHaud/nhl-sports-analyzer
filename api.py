@@ -305,7 +305,7 @@ def _snapshot_all_matchups_for_date(
         except Exception:
             continue
 
-        model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score)
+        model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
         ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
 
         diff = home_score - away_score
@@ -449,8 +449,8 @@ GOALIE_LEAGUE_AVG_SV = 0.905  # conservative league baseline
 GOALIE_SHRINK_STARTS = 10.0
 GOALIE_SAMPLE_FLOOR_STARTS = 8.0
 GOALIE_RATING_CAP = 0.03  # cap contribution in sv% points
-GOALIE_SCORE_K = 18.0  # maps rating delta to score (0.02 -> 0.36)
-GOALIE_SCORE_CAP = 0.5
+GOALIE_SCORE_K = 16.0  # maps rating delta to score (0.02 -> 0.32)
+GOALIE_SCORE_CAP = 0.45
 GOALIE_GSAX_PER60_WEIGHT = 0.008  # converts gsax/60 to sv%-like points
 GOALIE_GSAX_PER60_CAP = 1.5
 GOALIE_B2B_RATING_PENALTY = 0.006  # ~3-4% win-prob swing when scaled
@@ -656,7 +656,7 @@ def _lean_scores(
                     reasons_away.append(f"On a {length}-game losing streak")
 
     # Flat home-ice bonus (softened)
-    home_score += 0.35
+    home_score += 0.25
     reasons_home.append("Home-ice advantage")
 
     # Home/Road splits
@@ -684,10 +684,10 @@ def _lean_scores(
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 0.3
+        home_score += 0.2
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 0.3
+        away_score += 0.2
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
     # Advanced stats edge (xG/HDCF) from MoneyPuck if available
@@ -696,10 +696,10 @@ def _lean_scores(
     if xgf_pct_home is not None and xgf_pct_away is not None:
         delta = xgf_pct_home - xgf_pct_away
         if delta >= 3.0:
-            home_score += 0.6
+            home_score += 0.55
             reasons_home.append("Better xG share (season-to-date)")
         elif delta <= -3.0:
-            away_score += 0.6
+            away_score += 0.55
             reasons_away.append("Better xG share (season-to-date)")
 
     # Special teams edge (PP/PK) if meaningful
@@ -713,10 +713,10 @@ def _lean_scores(
         net_away = (pp_away or 0) - (100 - (pk_away or 0))
         delta = net_home - net_away
         if delta >= 5:
-            home_score += 0.2
+            home_score += 0.15
             reasons_home.append("Special teams edge")
         elif delta <= -5:
-            away_score += 0.2
+            away_score += 0.15
             reasons_away.append("Special teams edge")
 
     # Rest / back-to-back
@@ -725,18 +725,18 @@ def _lean_scores(
     home_days = rest_home.get("days_since_last")
     away_days = rest_away.get("days_since_last")
     if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
-        home_score -= 0.45
+        home_score -= 0.40
         reasons_away.append("Home on back-to-back; away more rested")
     if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
-        away_score -= 0.45
+        away_score -= 0.40
         reasons_home.append("Away on back-to-back; home more rested")
     if home_days is not None and away_days is not None:
         diff = home_days - away_days
         if diff >= 2:
-            home_score += 0.25
+            home_score += 0.20
             reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
         elif diff <= -2:
-            away_score += 0.25
+            away_score += 0.20
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
     # Goalie edge (continuous + capped)
@@ -804,7 +804,7 @@ def _ev_block(home_team, away_team, home_score, away_score, force_refresh=False)
         logger.info("[EV] Odds missing fields for %s vs %s", home_team, away_team)
         return None
 
-    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score)
+    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score, temperature=1.15)
     p_home_market = implied_prob_american(home_odds)
     p_away_market = implied_prob_american(away_odds)
     home_profit = profit_on_win_for_1_unit(home_odds)
@@ -1139,7 +1139,7 @@ def nhl_matchup(
         raise HTTPException(status_code=400, detail=str(e))
 
     # Always expose model win probabilities, even if odds/EV are unavailable.
-    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score)
+    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
     model_probs = {"home": model_home_prob, "away": model_away_prob}
 
     ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
