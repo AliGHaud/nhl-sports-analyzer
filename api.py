@@ -15,10 +15,20 @@ import time as time_module
 import shutil
 from datetime import date, datetime, timedelta, time, timezone
 from pathlib import Path
+from typing import Optional
+
+try:
+    import firebase_admin
+    from firebase_admin import auth as firebase_auth, credentials as firebase_credentials
+except Exception:
+    firebase_admin = None
+    firebase_auth = None
+    firebase_credentials = None
 from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Header, Depends
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -80,6 +90,12 @@ API_ADMIN_TOKEN = os.getenv("API_ADMIN_TOKEN")
 MANUAL_OVERRIDES_PATH = CACHE_DIR / "manual_overrides.json"
 SNAPSHOT_DIR = Path(os.getenv("SNAPSHOT_DIR", CACHE_DIR / "snapshots"))
 AUTO_SNAPSHOT_ENABLED = os.getenv("AUTO_SNAPSHOT_ENABLED", "true").lower() == "true"
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")
+FIREBASE_ENFORCE_AUTH = os.getenv("FIREBASE_ENFORCE_AUTH", "false").lower() == "true"
+FIREBASE_REQUIRE_PRO_FOR_PICK = os.getenv("FIREBASE_REQUIRE_PRO_FOR_PICK", "false").lower() == "true"
+FIREBASE_PRO_CLAIM_VALUE = os.getenv("FIREBASE_PRO_CLAIM_VALUE", "pro")
+FIREBASE_APP = None
 
 
 def _cleanup_daily_cache():
@@ -101,6 +117,23 @@ def _cleanup_daily_cache():
 
 
 _cleanup_daily_cache()
+
+
+def _init_firebase():
+    """Initialize Firebase admin if credentials are provided."""
+    global FIREBASE_APP
+    if FIREBASE_APP or not FIREBASE_CREDENTIALS_PATH or not firebase_admin or not firebase_credentials:
+        return
+    try:
+        cred = firebase_credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+        FIREBASE_APP = firebase_admin.initialize_app(cred, {"projectId": FIREBASE_PROJECT_ID} if FIREBASE_PROJECT_ID else None)
+        logger.info("Firebase initialized")
+    except Exception as e:
+        logger.warning("Firebase init failed: %s", e)
+        FIREBASE_APP = None
+
+
+_init_firebase()
 
 
 # ---------- Helpers ----------
@@ -151,6 +184,51 @@ def _now_in_zone():
             # Fall back to naive UTC if tzdata is missing
             return datetime.now(timezone.utc)
     return datetime.now(zone)
+
+
+def _decode_firebase_token(id_token: str) -> Optional[dict]:
+    if not FIREBASE_APP or not firebase_auth:
+        return None
+    try:
+        decoded = firebase_auth.verify_id_token(id_token)
+        return decoded
+    except Exception as e:
+        logger.info("Firebase token verify failed: %s", e)
+        return None
+
+
+def _extract_authorization_token(header_val: Optional[str]) -> Optional[str]:
+    if not header_val:
+        return None
+    try:
+        parts = header_val.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1]
+    except Exception:
+        return None
+    return None
+
+
+async def current_user_optional(authorization: str = Header(None)):
+    """
+    Return decoded firebase user dict or None.
+    If FIREBASE_ENFORCE_AUTH is True and verification fails, raise 401.
+    """
+    if not FIREBASE_APP:
+        return None
+    token = _extract_authorization_token(authorization)
+    decoded = _decode_firebase_token(token) if token else None
+    if FIREBASE_ENFORCE_AUTH and not decoded:
+        raise HTTPException(status_code=401, detail="Auth required")
+    return decoded
+
+
+def _is_pro(user: Optional[dict]) -> bool:
+    if not user:
+        return False
+    claims = user.get("claims") or user
+    tier = claims.get("tier") or claims.get("plan") or claims.get("role")
+    return tier == FIREBASE_PRO_CLAIM_VALUE
 
 
 def _read_overrides():
@@ -959,6 +1037,12 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
 
 
 # ---------- Routes ----------
+
+
+@app.get("/auth/me")
+def auth_me():
+    """Return basic app status (auth not enforced yet)."""
+    return {"auth_configured": bool(FIREBASE_CREDENTIALS_PATH)}
 
 
 @app.middleware("http")

@@ -61,6 +61,12 @@
   <h1>NHL Matchup Tester</h1>
   <div class="muted">Pick teams and dates, then run analysis. Powered by your local API.</div>
 
+  <div class="row" style="gap:8px; margin:8px 0;">
+    <button id="loginGoogle" style="background: linear-gradient(135deg, #2563eb, #1d4ed8);">Login with Google</button>
+    <button id="logoutBtn" class="toggle">Logout</button>
+    <div id="authStatus" class="muted">Not logged in</div>
+  </div>
+
   <div class="card">
     <div class="row">
       <label for="home">Home</label>
@@ -669,6 +675,84 @@
     loadTeams();
     loadToday();
     loadPick();
+  </script>
+
+  <!-- Firebase Auth (Google) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      signInWithPopup,
+      signOut,
+      onAuthStateChanged,
+    } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAd3w0--yeSJm4pUAbh2Oy8qpIf6OD8fc4",
+      authDomain: "sports-analyzer-bc0d6.firebaseapp.com",
+      projectId: "sports-analyzer-bc0d6",
+      storageBucket: "sports-analyzer-bc0d6.firebasestorage.app",
+      messagingSenderId: "773945640566",
+      appId: "1:773945640566:web:c4c0a9ccf1e30df7e4c157"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+    let idToken = null;
+
+    const statusEl = document.getElementById('authStatus');
+    const loginBtn = document.getElementById('loginGoogle');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    function updateStatus(email) {
+      if (statusEl) {
+        statusEl.textContent = email ? `Logged in as ${email}` : 'Not logged in';
+      }
+    }
+
+    async function loginWithGoogle() {
+      try {
+        const res = await signInWithPopup(auth, provider);
+        idToken = await res.user.getIdToken();
+        updateStatus(res.user.email);
+      } catch (err) {
+        console.error('Login failed', err);
+        alert('Login failed. Check console for details.');
+      }
+    }
+
+    async function logoutFirebase() {
+      try {
+        await signOut(auth);
+        idToken = null;
+        updateStatus(null);
+      } catch (err) {
+        console.error('Logout failed', err);
+      }
+    }
+
+    // Attach token to all fetch calls
+    const origFetch = window.fetch;
+    window.fetch = (url, opts = {}) => {
+      const headers = new Headers(opts.headers || {});
+      if (idToken) headers.set('Authorization', `Bearer ${idToken}`);
+      return origFetch(url, { ...opts, headers });
+    };
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        idToken = await user.getIdToken();
+        updateStatus(user.email);
+      } else {
+        idToken = null;
+        updateStatus(null);
+      }
+    });
+
+    if (loginBtn) loginBtn.onclick = loginWithGoogle;
+    if (logoutBtn) logoutBtn.onclick = logoutFirebase;
   </script>
 </body>
 </html>

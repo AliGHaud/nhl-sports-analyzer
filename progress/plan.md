@@ -61,7 +61,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 8) Injury/lineup adjustments: incorporate key player/goalie absences via simple ratings or flags to adjust lean scores.
 9) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
 10) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
-11) Auth/monetization: add user accounts, free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
+11) Auth/monetization: add user accounts (Firebase or similar), free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
 12) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
 13) Deploy: move to paid Render to avoid autosleep once ready.
 14) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
