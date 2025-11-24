@@ -881,10 +881,25 @@ class OverridePayload(BaseModel):
 
 # ---------- Pick of the Day helpers ----------
 
-def _pick_candidate_from_ev(home, away, ev, reasons):
-    """Return the best side candidate from an EV block or None."""
+def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
+    """Return the best side candidate from an EV block or None, applying filters."""
     if ev is None:
         return None
+
+    # Dynamic thresholds based on slate size
+    if slate_size <= 3:
+        min_ev = 0.05
+        min_edge = 2.0
+    elif slate_size <= 8:
+        min_ev = 0.08
+        min_edge = 3.0
+    else:
+        min_ev = 0.10
+        min_edge = 4.0
+    min_model_prob = 0.55
+    max_juice = 150  # cap at -150/+150
+
+    goalie_meta = reasons.get("goalie") if isinstance(reasons, dict) else None
 
     best = None
     for side_key, team in (("home", home), ("away", away)):
@@ -895,15 +910,28 @@ def _pick_candidate_from_ev(home, away, ev, reasons):
         market_prob = ev["market_prob"][side_key]
         odds = ev["odds"][f"{side_key}_ml"]
 
-        # Thresholds for a viable pick
-        if ev_units < 0.03:
+        # Odds cap
+        if odds is None or odds < -max_juice or odds > max_juice:
             continue
-        if edge_pct < 2.0:
+        # Filters for a viable pick
+        if ev_units < min_ev:
             continue
-        if model_prob < 0.52:
+        if edge_pct < min_edge:
+            continue
+        if model_prob < min_model_prob:
             continue
         if grade == "No Bet":
             continue
+
+        # Skip if goalie data missing/uncertain for the chosen side
+        if goalie_meta and isinstance(goalie_meta, dict):
+            if goalie_meta.get("error"):
+                continue
+            side_goalie = goalie_meta.get(side_key)
+            if side_goalie:
+                start_prob = side_goalie.get("start_prob")
+                if start_prob is not None and start_prob < 0.5:
+                    continue
 
         candidate = {
             "matchup": {"home": home, "away": away},
@@ -1363,17 +1391,29 @@ def nhl_pick(
             "params": {"lookback_days": lookback_days, "force_refresh": force_refresh},
         }
 
+    # Load projected goalies for uncertainty filtering
+    try:
+        projected_goalies = load_projected_goalies(end_str, force_refresh=force_refresh)
+    except Exception:
+        projected_goalies = None
+
     candidates = []
     for g in schedule:
         home = g["home_team"]
         away = g["away_team"]
         try:
-            home_score, away_score, reasons = _lean_scores(home, away, games, force_refresh=force_refresh)
+            home_score, away_score, reasons = _lean_scores(
+                home,
+                away,
+                games,
+                force_refresh=force_refresh,
+                projected_goalies=projected_goalies["items"] if projected_goalies else None,
+            )
         except ValueError:
             continue
 
         ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
-        candidate = _pick_candidate_from_ev(home, away, ev, reasons)
+        candidate = _pick_candidate_from_ev(home, away, ev, reasons, slate_size=len(schedule))
         if candidate:
             candidates.append(candidate)
 
