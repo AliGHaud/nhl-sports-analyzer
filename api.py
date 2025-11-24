@@ -449,8 +449,8 @@ GOALIE_LEAGUE_AVG_SV = 0.905  # conservative league baseline
 GOALIE_SHRINK_STARTS = 10.0
 GOALIE_SAMPLE_FLOOR_STARTS = 8.0
 GOALIE_RATING_CAP = 0.03  # cap contribution in sv% points
-GOALIE_SCORE_K = 20.0  # maps rating delta to score (0.02 -> 0.4)
-GOALIE_SCORE_CAP = 0.6
+GOALIE_SCORE_K = 18.0  # maps rating delta to score (0.02 -> 0.36)
+GOALIE_SCORE_CAP = 0.5
 GOALIE_GSAX_PER60_WEIGHT = 0.008  # converts gsax/60 to sv%-like points
 GOALIE_GSAX_PER60_CAP = 1.5
 GOALIE_B2B_RATING_PENALTY = 0.006  # ~3-4% win-prob swing when scaled
@@ -655,10 +655,9 @@ def _lean_scores(
                 if stype == "L" and length >= 3:
                     reasons_away.append(f"On a {length}-game losing streak")
 
-    # Flat home-ice bonus
-    home_score += 0.75
+    # Flat home-ice bonus (softened)
+    home_score += 0.35
     reasons_home.append("Home-ice advantage")
-    home_score -= 0.25  # adjust to net +0.50 total bonus
 
     # Home/Road splits
     def pct(stats):
@@ -697,10 +696,10 @@ def _lean_scores(
     if xgf_pct_home is not None and xgf_pct_away is not None:
         delta = xgf_pct_home - xgf_pct_away
         if delta >= 3.0:
-            home_score += 0.7
+            home_score += 0.6
             reasons_home.append("Better xG share (season-to-date)")
         elif delta <= -3.0:
-            away_score += 0.7
+            away_score += 0.6
             reasons_away.append("Better xG share (season-to-date)")
 
     # Special teams edge (PP/PK) if meaningful
@@ -726,10 +725,10 @@ def _lean_scores(
     home_days = rest_home.get("days_since_last")
     away_days = rest_away.get("days_since_last")
     if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
-        home_score -= 0.5
+        home_score -= 0.45
         reasons_away.append("Home on back-to-back; away more rested")
     if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
-        away_score -= 0.5
+        away_score -= 0.45
         reasons_home.append("Away on back-to-back; home more rested")
     if home_days is not None and away_days is not None:
         diff = home_days - away_days
