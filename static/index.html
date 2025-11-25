@@ -73,26 +73,29 @@
   </div>
 
   <div class="card">
-    <div class="row">
-      <label for="home">Home</label>
-      <select id="home"></select>
-      <label for="away">Away</label>
-      <select id="away"></select>
+    <div id="analyzerControls" style="display:none;">
+      <div class="row">
+        <label for="home">Home</label>
+        <select id="home"></select>
+        <label for="away">Away</label>
+        <select id="away"></select>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <label for="start">Start date</label>
+        <input id="start" type="date" />
+        <label for="end">End date</label>
+        <input id="end" type="date" />
+        <button id="forceBtn" class="toggle">Force refresh</button>
+        <button id="go">Analyze Matchup</button>
+        <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
+        <button id="pickBtn" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Pick of the Day</button>
+        <button id="snapshotBtn" class="toggle" title="Admin: trigger today's snapshot">Run Snapshot</button>
+      </div>
     </div>
-    <div class="row" style="margin-top: 12px;">
-      <label for="start">Start date</label>
-      <input id="start" type="date" />
-      <label for="end">End date</label>
-      <input id="end" type="date" />
-      <button id="forceBtn" class="toggle">Force refresh</button>
-      <button id="go">Analyze Matchup</button>
-      <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
-      <button id="pickBtn" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Pick of the Day</button>
-      <button id="snapshotBtn" class="toggle" title="Admin: trigger today's snapshot">Run Snapshot</button>
-    </div>
-    <div class="row" style="margin-top:8px; gap:8px;">
+    <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
       <label for="adminToken">Admin token</label>
       <input id="adminToken" type="password" placeholder="x-admin-token" style="max-width:240px;">
+      <div class="muted">Enter token to unlock analyzer</div>
     </div>
   </div>
 
@@ -667,6 +670,14 @@
       rawContainer.style.display = open ? 'none' : 'block';
       toggleRawBtn.textContent = open ? 'Show' : 'Hide';
     });
+    adminTokenInput.addEventListener('input', () => {
+      const val = adminTokenInput.value || '';
+      if (val.length > 0) {
+        analyzerControls.style.display = 'block';
+      } else {
+        analyzerControls.style.display = 'none';
+      }
+    });
     snapshotBtn.addEventListener('click', async () => {
       const token = adminTokenInput.value || localStorage.getItem('adminToken');
       if (!token) {
@@ -697,7 +708,10 @@
     // preload token if stored
     try {
       const savedToken = localStorage.getItem('adminToken');
-      if (savedToken) adminTokenInput.value = savedToken;
+      if (savedToken) {
+        adminTokenInput.value = savedToken;
+        analyzerControls.style.display = 'block';
+      }
     } catch (e) {}
     modalClose.addEventListener('click', () => { modalBackdrop.style.display = 'none'; });
     modalBackdrop.addEventListener('click', (e) => {
