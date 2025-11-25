@@ -62,18 +62,13 @@ def american_to_decimal(us: float) -> float:
     return 100.0 / (-us) + 1.0
 
 
-def calc_ev(prob: float, us_line: float) -> float:
-    """Expected value in units for a 1u bet."""
-    dec = american_to_decimal(us_line)
-    return prob * (dec - 1.0) - (1.0 - prob)
-
-
 def backtest(
     start_date: str,
     end_date: str,
     odds_file: str | None = None,
     min_edge: float = 0.05,
     min_prob: float = 0.5,
+    stake: float = 1.0,
 ):
     games = load_games_from_espn_date_range(start_date, end_date, force_refresh=False)
     if not games:
@@ -87,13 +82,25 @@ def backtest(
     buckets = defaultdict(lambda: {"n": 0, "wins": 0})
     failures = 0
     odds_hits = 0
-    ev_sum = 0.0
     edge_sum = 0.0
     bet_count = 0
+    bet_wins = 0
+    total_profit = 0.0
+    total_staked = 0.0
+    fav_split = {
+        "favorite": {"bets": 0, "wins": 0, "profit": 0.0},
+        "underdog": {"bets": 0, "wins": 0, "profit": 0.0},
+    }
+    side_split = {
+        "home": {"bets": 0, "wins": 0, "profit": 0.0},
+        "away": {"bets": 0, "wins": 0, "profit": 0.0},
+    }
 
     odds_lookup = {}
     if odds_file:
         odds_lookup = load_clean_odds(odds_file)
+
+    prob_threshold = max(min_prob, 0.5)
 
     for g in games:
         try:
@@ -146,12 +153,31 @@ def backtest(
             if odds and odds.get("home_ml_close") and odds.get("away_ml_close"):
                 odds_hits += 1
                 home_ml = float(odds["home_ml_close"])
+                away_ml = float(odds["away_ml_close"])
                 implied_home = american_to_prob(home_ml)
+                implied_away = american_to_prob(away_ml)
                 edge = prob_home - implied_home
-                if prob_home >= min_prob and edge > min_edge:
+                if prob_home >= prob_threshold and edge > min_edge:
                     bet_count += 1
                     edge_sum += edge
-                    ev_sum += calc_ev(prob_home, home_ml)
+                    total_staked += stake
+                    decimal_odds = american_to_decimal(home_ml)
+                    win = outcome == 1
+                    if win:
+                        bet_wins += 1
+                        profit = stake * (decimal_odds - 1.0)
+                    else:
+                        profit = -stake
+                    total_profit += profit
+                    fav_key = "favorite" if implied_home >= implied_away else "underdog"
+                    fav_split[fav_key]["bets"] += 1
+                    fav_split[fav_key]["profit"] += profit
+                    if win:
+                        fav_split[fav_key]["wins"] += 1
+                    side_split["home"]["bets"] += 1
+                    side_split["home"]["profit"] += profit
+                    if win:
+                        side_split["home"]["wins"] += 1
 
     if total == 0:
         print("No usable games found.")
@@ -173,15 +199,45 @@ def backtest(
     if odds_lookup:
         print(f"\nOdds coverage: {odds_hits}/{total}")
         print(
-            f"Bet filter -> min_prob: {min_prob:.2f}, "
-            f"min_edge: {min_edge*100:.1f}% (prob - market)"
+            f"Bet filter -> stake: {stake:.2f}u, min_prob: {prob_threshold:.2f}, "
+            f"min_edge: {min_edge*100:.1f}%"
         )
         if bet_count:
             print(f"Bets meeting filter: {bet_count}")
+            avg_edge = edge_sum / bet_count * 100.0
+            hit_rate = bet_wins / bet_count * 100.0
+            roi = total_profit / total_staked * 100.0 if total_staked else 0.0
             print(
-                f"Avg edge (filtered): {edge_sum/bet_count*100:.2f}% | "
-                f"Avg EV (1u): {ev_sum/bet_count:.3f}"
+                f"Avg edge: {avg_edge:.2f}% | Hit rate: {hit_rate:.2f}% | "
+                f"Profit: {total_profit:.2f}u on {total_staked:.2f}u staked "
+                f"(ROI {roi:.2f}%)"
             )
+            print("Favorite vs. Underdog results:")
+            for label, stats in fav_split.items():
+                if not stats["bets"]:
+                    continue
+                fav_roi = (
+                    stats["profit"] / (stats["bets"] * stake) * 100.0 if stake else 0.0
+                )
+                fav_hit = stats["wins"] / stats["bets"] * 100.0
+                print(
+                    f"  {label.capitalize()}: {stats['bets']} bets, "
+                    f"hit {fav_hit:.1f}%, profit {stats['profit']:.2f}u "
+                    f"(ROI {fav_roi:.2f}%)"
+                )
+            print("Home vs. Away results:")
+            for label, stats in side_split.items():
+                if not stats["bets"]:
+                    continue
+                side_roi = (
+                    stats["profit"] / (stats["bets"] * stake) * 100.0 if stake else 0.0
+                )
+                side_hit = stats["wins"] / stats["bets"] * 100.0
+                print(
+                    f"  {label.capitalize()}: {stats['bets']} bets, "
+                    f"hit {side_hit:.1f}%, profit {stats['profit']:.2f}u "
+                    f"(ROI {side_roi:.2f}%)"
+                )
         else:
             print("No games met the betting filter.")
 
@@ -203,6 +259,12 @@ if __name__ == "__main__":
         default=0.5,
         help="Minimum model probability threshold required to count a bet (default 0.5)",
     )
+    parser.add_argument(
+        "--stake",
+        type=float,
+        default=1.0,
+        help="Flat stake (units) for each qualifying bet (default 1.0)",
+    )
     args = parser.parse_args()
     backtest(
         args.start,
@@ -210,4 +272,5 @@ if __name__ == "__main__":
         odds_file=args.odds,
         min_edge=args.min_edge,
         min_prob=args.min_prob,
+        stake=args.stake,
     )
