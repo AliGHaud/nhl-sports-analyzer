@@ -757,6 +757,8 @@
     const statusEl = document.getElementById('authStatus');
     const loginBtn = document.getElementById('loginGoogle');
     const logoutBtn = document.getElementById('logoutBtn');
+    const adminInput = document.getElementById('adminToken');
+    const analyzerControlsEl = document.getElementById('analyzerControls');
 
     function updateStatus(email) {
       if (statusEl) {
@@ -793,6 +795,25 @@
       return origFetch(url, { ...opts, headers });
     };
 
+    async function verifyAdminToken(tokenVal) {
+      const token = tokenVal || adminInput.value || '';
+      if (!token) {
+        analyzerControlsEl.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch('/auth/admin_check', { headers: { 'x-admin-token': token } });
+        if (res.ok) {
+          analyzerControlsEl.style.display = 'block';
+          localStorage.setItem('adminToken', token);
+        } else {
+          analyzerControlsEl.style.display = 'none';
+        }
+      } catch (err) {
+        analyzerControlsEl.style.display = 'none';
+      }
+    }
+
     async function verifyAdminToken(val = null) {
       if (!analyzerControls) return;
       const token = val || adminTokenInput.value || '';
@@ -825,6 +846,15 @@
 
     if (loginBtn) loginBtn.onclick = loginWithGoogle;
     if (logoutBtn) logoutBtn.onclick = logoutFirebase;
+    if (adminInput) adminInput.addEventListener('input', () => verifyAdminToken());
+    // preload token
+    try {
+      const saved = localStorage.getItem('adminToken');
+      if (saved) {
+        adminInput.value = saved;
+        verifyAdminToken(saved);
+      }
+    } catch (e) {}
   </script>
 </body>
 </html>
