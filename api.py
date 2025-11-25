@@ -1088,10 +1088,13 @@ def sports():
 
 
 @app.get("/teams")
-def list_teams():
-    """List NHL team abbreviations for UI dropdowns."""
-    teams = SPORTS["nhl"]["teams"]
-    return {"sport": "nhl", "teams": teams}
+def list_teams(sport: str = Query("nhl", description="Sport id, e.g. nhl or nfl")):
+    """List team abbreviations for UI dropdowns."""
+    sport = sport.lower()
+    if sport not in SPORTS:
+        raise HTTPException(status_code=400, detail="Unknown sport.")
+    teams = SPORTS[sport]["teams"]
+    return {"sport": sport, "teams": teams}
 
 
 # ---------- NFL Routes ----------

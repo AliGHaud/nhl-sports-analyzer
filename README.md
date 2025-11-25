@@ -28,6 +28,7 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
   - `GET /nfl/matchup?home=SF&away=KC[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD]`
   - `GET /nfl/team?team=SF[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD]`
   - `GET /nfl/pick` (not yet implemented; returns 501)
+- UI: use the sport selector (NHL/NFL). NFL pick is disabled in the UI for now.
 
 ## Notes
 - Data sources: ESPN public NHL endpoint (games/odds) and MoneyPuck (xG/advanced team stats). Optional: API-Sports Hockey (fixtures/odds) when `API_SPORTS_KEY` is set.

@@ -189,8 +189,11 @@
 
     async function loadTeams() {
       try {
-        const res = await fetch('/teams');
+        const sport = sportSel.value || 'nhl';
+        const res = await fetch(`/teams?sport=${sport}`);
         const data = await res.json();
+        homeSel.innerHTML = '';
+        awaySel.innerHTML = '';
         (data.teams || []).forEach(code => {
           const opt1 = document.createElement('option');
           opt1.value = code; opt1.textContent = code;
@@ -683,6 +686,18 @@
     modalBackdrop.addEventListener('click', (e) => {
       if (e.target === modalBackdrop) modalBackdrop.style.display = 'none';
     });
+    sportSel.addEventListener('change', () => {
+      loadTeams().then(() => loadToday());
+      // disable pick for NFL until implemented
+      if ((sportSel.value || 'nhl') !== 'nhl') {
+        pickBtn.disabled = true;
+        pickBtn.textContent = 'Pick of the Day (NHL only)';
+      } else {
+        pickBtn.disabled = false;
+        pickBtn.textContent = 'Pick of the Day';
+      }
+    });
+
     loadTeams();
     loadToday();
     loadPick();
