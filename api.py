@@ -59,6 +59,16 @@ from nhl_analyzer import (
     model_probs_from_scores,
     confidence_grade,
 )
+from nfl_analyzer import (
+    lean_matchup as nfl_lean_matchup,
+    calculate_stats as nfl_calculate_stats,
+)
+from nfl_data_sources import (
+    load_games_from_espn_date_range as load_games_nfl_range,
+    load_schedule_for_date as load_schedule_nfl,
+    load_current_odds_for_matchup as load_odds_nfl,
+    load_games_from_espn_scoreboard as load_games_nfl_today,
+)
 
 app = FastAPI(title="NHL Betting Analyzer API", version="0.1.0")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -75,6 +85,14 @@ SPORTS = {
     "nhl": {
         "title": "NHL",
         "teams": sorted(TEAM_CODE_TO_ID.keys()),
+    },
+    "nfl": {
+        "title": "NFL",
+        "teams": [
+            "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN",
+            "DET","GB","HOU","IND","JAX","KC","LV","LAC","LAR","MIA","MIN",
+            "NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WAS"
+        ],
     },
 }
 
@@ -1074,6 +1092,98 @@ def list_teams():
     """List NHL team abbreviations for UI dropdowns."""
     teams = SPORTS["nhl"]["teams"]
     return {"sport": "nhl", "teams": teams}
+
+
+# ---------- NFL Routes ----------
+
+@app.get("/nfl/today")
+def nfl_today(force_refresh: bool = Query(False), user: Optional[dict] = Depends(current_user_optional)):
+    now = _now_in_zone()
+    today = now.date().isoformat()
+    schedule = load_schedule_nfl(today)
+    enriched = []
+    for g in schedule:
+        odds = load_odds_nfl(g["home_team"], g["away_team"])
+        enriched.append({"home_team": g["home_team"], "away_team": g["away_team"], "odds": odds})
+    return {"date": today, "games": enriched, "force_refresh": force_refresh}
+
+
+@app.get("/nfl/team")
+def nfl_team(
+    team: str = Query(..., description="Team abbreviation, e.g. SF"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    force_refresh: bool = Query(False),
+    user: Optional[dict] = Depends(current_user_optional),
+):
+    today = _now_in_zone().date()
+    default_start = today - timedelta(days=120)
+    start_dt = _parse_date_or_400(start_date, default_start, "start_date")
+    end_dt = _parse_date_or_400(end_date, today, "end_date")
+    start_str = start_dt.isoformat()
+    end_str = end_dt.isoformat()
+    games = load_games_nfl_range(start_str, end_str)
+    if not games:
+        raise HTTPException(status_code=400, detail="No games in range")
+    stats = nfl_calculate_stats(team.upper(), games)
+    return {"params": {"team": team.upper(), "start_date": start_str, "end_date": end_str}, "profile": stats}
+
+
+@app.get("/nfl/matchup")
+def nfl_matchup(
+    home: str = Query(...),
+    away: str = Query(...),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    force_refresh: bool = Query(False),
+    user: Optional[dict] = Depends(current_user_optional),
+):
+    today = _now_in_zone().date()
+    default_start = today - timedelta(days=120)
+    start_dt = _parse_date_or_400(start_date, default_start, "start_date")
+    end_dt = _parse_date_or_400(end_date, today, "end_date")
+    start_str = start_dt.isoformat()
+    end_str = end_dt.isoformat()
+    games = load_games_nfl_range(start_str, end_str)
+    if not games:
+        raise HTTPException(status_code=400, detail="No games in range")
+    home_score, away_score, reasons = nfl_lean_matchup(home.upper(), away.upper(), games)
+    if home_score is None:
+        raise HTTPException(status_code=400, detail="Not enough data")
+    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
+    ev = None
+    odds = load_odds_nfl(home.upper(), away.upper())
+    if odds and odds.get("home_ml") is not None and odds.get("away_ml") is not None:
+        p_home_market = implied_prob_american(odds["home_ml"])
+        p_away_market = implied_prob_american(odds["away_ml"])
+        home_profit = profit_on_win_for_1_unit(odds["home_ml"])
+        away_profit = profit_on_win_for_1_unit(odds["away_ml"])
+        home_ev = model_home_prob * home_profit - (1 - model_home_prob)
+        away_ev = model_away_prob * away_profit - (1 - model_away_prob)
+        home_edge = (model_home_prob - p_home_market) * 100
+        away_edge = (model_away_prob - p_away_market) * 100
+        ev = {
+            "odds": odds,
+            "model_prob": {"home": model_home_prob, "away": model_away_prob},
+            "market_prob": {"home": p_home_market, "away": p_away_market},
+            "edge_pct": {"home": home_edge, "away": away_edge},
+            "ev_units": {"home": home_ev, "away": away_ev},
+            "grades": {"home": confidence_grade(home_edge, home_ev), "away": confidence_grade(away_edge, away_ev)},
+        }
+    diff = home_score - away_score
+    side_lean = reasons.get("lean") or "No clear edge"
+    return {
+        "params": {"home": home.upper(), "away": away.upper(), "start_date": start_str, "end_date": end_str},
+        "side": {"home_score": home_score, "away_score": away_score, "lean": side_lean, "reasons": reasons},
+        "model_prob": {"home": model_home_prob, "away": model_away_prob},
+        "ev": ev,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/nfl/pick")
+def nfl_pick():
+    raise HTTPException(status_code=501, detail="NFL pick not implemented yet.")
 
 
 @app.get("/nhl/today")

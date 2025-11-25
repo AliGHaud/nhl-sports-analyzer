@@ -69,6 +69,13 @@
 
   <div class="card">
     <div class="row">
+      <label for="sport">Sport</label>
+      <select id="sport">
+        <option value="nhl">NHL</option>
+        <option value="nfl">NFL</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top: 8px;">
       <label for="home">Home</label>
       <select id="home"></select>
       <label for="away">Away</label>
@@ -145,6 +152,7 @@
   <script>
     const homeSel = document.getElementById('home');
     const awaySel = document.getElementById('away');
+    const sportSel = document.getElementById('sport');
     const startInp = document.getElementById('start');
     const endInp = document.getElementById('end');
     const forceBtn = document.getElementById('forceBtn');
@@ -491,9 +499,10 @@
     async function loadToday(forceRefresh = null) {
       todayGamesEl.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
       const useForce = forceRefresh === null ? shouldForceRefreshToday() : forceRefresh;
+      const sport = sportSel.value || 'nhl';
       const params = useForce ? '?force_refresh=true' : '';
       try {
-        const res = await fetch('/nhl/today' + params);
+        const res = await fetch(`/${sport}/today` + params);
         const body = await res.json();
         if (!res.ok) {
           todayGamesEl.innerHTML = `<div class="error">Error: ${body.detail || 'failed to load'}</div>`;
@@ -514,11 +523,11 @@
         todayGamesEl.innerHTML = filtered.map((g, idx) => `
           <div class="card" style="padding:12px; margin:0;">
             <div class="row" style="justify-content: space-between; align-items: center;">
-              <div><strong>${g.away} @ ${g.home}</strong></div>
+              <div><strong>${g.away || g.away_team || g.away} @ ${g.home || g.home_team || g.home}</strong></div>
             </div>
             <div class="row" style="justify-content: space-between; align-items: center; margin-top:6px;">
               <div class="muted">${g.odds ? `Odds: ${g.odds.away_ml > 0 ? '+'+g.odds.away_ml : g.odds.away_ml} / ${g.odds.home_ml > 0 ? '+'+g.odds.home_ml : g.odds.home_ml}` : 'Odds unavailable'}</div>
-              <button data-home="${g.home}" data-away="${g.away}" class="analyze-btn">Analyze</button>
+              <button data-home="${g.home || g.home_team}" data-away="${g.away || g.away_team}" class="analyze-btn">Analyze</button>
             </div>
           </div>
         `).join('');
@@ -540,6 +549,7 @@
 
     async function analyze() {
       const params = new URLSearchParams();
+      const sport = sportSel.value || 'nhl';
       params.set('home', homeSel.value);
       params.set('away', awaySel.value);
       if (startInp.value) params.set('start_date', startInp.value);
@@ -553,7 +563,7 @@
       teamsEl.innerHTML = '';
       out.textContent = 'Loading...';
       try {
-        const res = await fetch('/nhl/matchup?' + params.toString());
+        const res = await fetch(`/${sport}/matchup?` + params.toString());
         const body = await res.json();
         if (!res.ok) {
           out.textContent = 'Error: ' + (body.detail || 'Request failed');
@@ -584,6 +594,7 @@
       const params = new URLSearchParams();
       params.set('home', home);
       params.set('away', away);
+      const sport = sportSel.value || 'nhl';
       if (forceRefresh) params.set('force_refresh', 'true');
 
       modalTitle.textContent = `${away} @ ${home}`;
@@ -596,7 +607,7 @@
       modalBackdrop.style.display = 'flex';
 
       try {
-        const res = await fetch('/nhl/matchup?' + params.toString());
+        const res = await fetch(`/${sport}/matchup?` + params.toString());
         const body = await res.json();
         if (!res.ok) {
           modalSummary.innerHTML = `<div class="error">Error: ${body.detail || 'Request failed'}</div>`;

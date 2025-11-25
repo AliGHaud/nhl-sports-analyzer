@@ -23,6 +23,11 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
   - Returns the “Pick of the Day” (best qualifying +EV side) or a clear reason if no pick meets thresholds. Pick is gated until 12:00 in `APP_TIMEZONE`.
 - `GET /sports`
   - Lists supported sports and team codes (foundation for multi-sport).
+- NFL (beta):
+  - `GET /nfl/today`
+  - `GET /nfl/matchup?home=SF&away=KC[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD]`
+  - `GET /nfl/team?team=SF[&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD]`
+  - `GET /nfl/pick` (not yet implemented; returns 501)
 
 ## Notes
 - Data sources: ESPN public NHL endpoint (games/odds) and MoneyPuck (xG/advanced team stats). Optional: API-Sports Hockey (fixtures/odds) when `API_SPORTS_KEY` is set.
@@ -31,6 +36,7 @@ Open http://127.0.0.1:8000/docs for interactive docs (Swagger UI).
 - Pick of the Day: API/UI will show “Pick available after noon” until the gate time in `APP_TIMEZONE`.
 - Stop the server with Ctrl+C. Restart via `.\\start-api.ps1`.
 - Admin overrides: `/admin` (requires `API_ADMIN_TOKEN`) provides a simple UI to manage manual injury/goalie overrides; overrides are stored under `data/cache/manual_overrides.json`.
+- Firebase auth (optional): frontend wiring for Google login; backend scaffolding for token verification and optional pick gating. Configure `FIREBASE_CREDENTIALS_PATH`/`FIREBASE_PROJECT_ID` and set `FIREBASE_ENFORCE_AUTH` / `FIREBASE_REQUIRE_PRO_FOR_PICK` when ready.
 
 ## Configuration
 - `API_SPORTS_KEY` (optional): API-Sports key to pull NHL fixtures/odds (multi-sport capable). Defaults to ESPN-only if unset.
