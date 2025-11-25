@@ -123,8 +123,20 @@ def backtest(start_date: str, end_date: str, odds_file: str | None = None):
         buckets[b]["wins"] += outcome
 
         if odds_lookup:
-            key = (g["date"], home, away)
-            odds = odds_lookup.get(key)
+            from datetime import datetime, timedelta
+
+            # Try exact date first, then ±1 day for timezone mismatches
+            game_date = datetime.strptime(g["date"], "%Y-%m-%d")
+            day_before = (game_date - timedelta(days=1)).strftime("%Y-%m-%d")
+            day_after = (game_date + timedelta(days=1)).strftime("%Y-%m-%d")
+
+            odds = None
+            for date_key in [g["date"], day_before, day_after]:
+                key = (date_key, home, away)
+                if key in odds_lookup:
+                    odds = odds_lookup[key]
+                    break
+
             if odds and odds.get("home_ml_close") and odds.get("away_ml_close"):
                 odds_hits += 1
                 home_ml = float(odds["home_ml_close"])
