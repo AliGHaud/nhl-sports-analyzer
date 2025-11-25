@@ -1323,6 +1323,7 @@ def nhl_matchup(
         and not force_refresh
         and is_default_range_today
         and now.time() >= pick_gate
+        and not debug  # always recompute when debug is requested
     )
 
     if snapshot_allowed:
