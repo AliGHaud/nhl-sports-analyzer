@@ -87,6 +87,7 @@
         <input id="end" type="date" />
         <button id="forceBtn" class="toggle">Force refresh</button>
         <button id="go">Analyze Matchup</button>
+        <button id="debugBtn" class="toggle">Analyze (Debug)</button>
         <button id="goTeam" style="background: linear-gradient(135deg, #22c55e, #16a34a);">Analyze Team</button>
         <button id="pickBtn" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Pick of the Day</button>
         <button id="snapshotBtn" class="toggle" title="Admin: trigger today's snapshot">Run Snapshot</button>
@@ -176,6 +177,7 @@
     const goTeamBtn = document.getElementById('goTeam');
     const pickBtn = document.getElementById('pickBtn');
     const snapshotBtn = document.getElementById('snapshotBtn');
+    const debugBtn = document.getElementById('debugBtn');
     const adminTokenInput = document.getElementById('adminToken');
     const analyzerControls = document.getElementById('analyzerControls');
     const pickCard = document.getElementById('pickCard');
@@ -610,7 +612,7 @@
       }
     }
 
-    async function analyze() {
+    async function analyze(useDebug = false) {
       const params = new URLSearchParams();
       const sport = currentSport || 'nhl';
       params.set('home', homeSel.value);
@@ -618,6 +620,7 @@
       if (startInp.value) params.set('start_date', startInp.value);
       if (endInp.value) params.set('end_date', endInp.value);
       if (forceRefresh) params.set('force_refresh', 'true');
+      if (useDebug) params.set('debug', 'true');
       summaryEl.style.display = 'none';
       reasonsEl.style.display = 'none';
       evEl.style.display = 'none';
@@ -697,7 +700,8 @@
       }
     }
 
-    document.getElementById('go').addEventListener('click', analyze);
+    document.getElementById('go').addEventListener('click', () => analyze(false));
+    if (debugBtn) debugBtn.addEventListener('click', () => analyze(true));
     goTeamBtn.addEventListener('click', analyzeTeam);
     pickBtn.addEventListener('click', loadPick);
     refreshTodayBtn.addEventListener('click', () => loadToday(true));

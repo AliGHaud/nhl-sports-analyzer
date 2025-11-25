@@ -159,7 +159,7 @@
 
     btnNhl.onclick = () => setSport('nhl');
     btnNfl.onclick = () => setSport('nfl');
-    goBtn.onclick = analyze;
+    goBtn.onclick = () => analyze();
     toggleRawBtn.onclick = () => {
       rawEl.style.display = rawEl.style.display === 'block' ? 'none' : 'block';
       toggleRawBtn.textContent = rawEl.style.display === 'block' ? 'Hide' : 'Show';
