@@ -147,6 +147,10 @@
         <div id="modalEv" class="card" style="display:none;"></div>
       </div>
       <div id="modalTeams" class="grid grid-2" style="margin-top:8px;"></div>
+      <div id="modalDebug" class="card" style="display:none; margin-top:8px;"></div>
+      <div class="row" style="margin-top:8px; justify-content:flex-end;">
+        <button id="modalDebugBtn" class="toggle">Reload with Debug</button>
+      </div>
     </div>
   </div>
 
@@ -188,9 +192,16 @@
     const modalEv = document.getElementById('modalEv');
     const modalTeams = document.getElementById('modalTeams');
     const modalTitle = document.getElementById('modalTitle');
+    const modalDebug = document.getElementById('modalDebug');
+    const modalDebugBtn = document.getElementById('modalDebugBtn');
+    const modalDebugContent = document.createElement('div');
+    modalDebugContent.className = 'card';
+    modalDebugContent.style.marginTop = '8px';
+    modalDebugContent.style.display = 'none';
     const REFRESH_GATE_HOUR = 8; // 8 AM local
 
     let currentSport = 'nhl';
+    let lastModal = { home: null, away: null, sport: 'nhl' };
 
     function setSport(sport) {
       currentSport = sport;
@@ -265,6 +276,34 @@
         <div style="margin-top:10px;" class="row">
           <div class="pill"><strong>Projected ${params.home} G:</strong> ${homeGoalie}</div>
           <div class="pill"><strong>Projected ${params.away} G:</strong> ${awayGoalie}</div>
+        </div>
+      `;
+      targetEl.style.display = 'block';
+    }
+
+    function renderDebug(debugData, targetEl) {
+      if (!targetEl) return;
+      if (!debugData) {
+        targetEl.style.display = 'none';
+        targetEl.innerHTML = '';
+        return;
+      }
+      const homeRows = (debugData.home_contribs || []).map(c => `<tr><td>${c.metric}</td><td>${fmt(c.value)}</td><td>${c.reason || ''}</td></tr>`).join('') || '<tr><td colspan="3">None</td></tr>';
+      const awayRows = (debugData.away_contribs || []).map(c => `<tr><td>${c.metric}</td><td>${fmt(c.value)}</td><td>${c.reason || ''}</td></tr>`).join('') || '<tr><td colspan="3">None</td></tr>';
+      targetEl.innerHTML = `
+        <h3 style="margin:0 0 6px;">Debug breakdown</h3>
+        <div class="grid grid-2">
+          <div>
+            <strong>Home</strong>
+            <table class="stat-table">${homeRows}</table>
+          </div>
+          <div>
+            <strong>Away</strong>
+            <table class="stat-table">${awayRows}</table>
+          </div>
+        </div>
+        <div style="margin-top:6px;">
+          <strong>Temperature:</strong> ${debugData.temperature || '-'}
         </div>
       `;
       targetEl.style.display = 'block';
@@ -614,21 +653,25 @@
       }
     }
 
-    async function analyzeToModal(home, away) {
+    async function analyzeToModal(home, away, debugFlag = false) {
       const params = new URLSearchParams();
       params.set('home', home);
       params.set('away', away);
       const sport = currentSport || 'nhl';
       if (forceRefresh) params.set('force_refresh', 'true');
+      if (debugFlag) params.set('debug', 'true');
 
       modalTitle.textContent = `${away} @ ${home}`;
       modalSummary.innerHTML = '<div class="skeleton" style="height:48px;"></div>';
       modalGoalie.style.display = 'none';
       modalReasons.style.display = 'none';
       modalEv.style.display = 'none';
+      modalDebug.style.display = 'none';
+      modalDebug.innerHTML = '';
       injuriesEl.style.display = 'none';
       modalTeams.innerHTML = '';
       modalBackdrop.style.display = 'flex';
+      lastModal = { home, away, sport };
 
       try {
         const res = await fetch(`/${sport}/matchup?` + params.toString());
@@ -641,6 +684,7 @@
         renderGoalieCard(body.side, modalGoalie);
         renderReasons(body.side, modalReasons);
         renderEV(body.ev, body.params, modalEv);
+        renderDebug(body.side?.reasons?.debug, modalDebug);
         if (body.injuries) {
           const injDiv = document.createElement('div');
           injDiv.style.marginTop = '12px';
@@ -712,6 +756,11 @@
     modalClose.addEventListener('click', () => { modalBackdrop.style.display = 'none'; });
     modalBackdrop.addEventListener('click', (e) => {
       if (e.target === modalBackdrop) modalBackdrop.style.display = 'none';
+    });
+    modalDebugBtn.addEventListener('click', () => {
+      if (!lastModal.home || !lastModal.away) return;
+      setSport(lastModal.sport || 'nhl');
+      analyzeToModal(lastModal.home, lastModal.away, true);
     });
     btnNhl.addEventListener('click', () => {
       setSport('nhl');
