@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Matchup Debugger</title>
+  <style>
+    body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0; padding: 16px; background: #0b1221; color: #e2e8f0; }
+    h1 { margin: 0 0 8px; }
+    .card { background: #0f172a; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    select, input, button { padding: 10px; border: 1px solid #1f2937; border-radius: 8px; background: #0b1020; color: #e2e8f0; }
+    button { cursor: pointer; background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; }
+    pre { background: #0b1020; padding: 10px; border-radius: 8px; overflow: auto; max-height: 300px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 4px 6px; border-bottom: 1px solid #1f2937; }
+  </style>
+</head>
+<body>
+  <h1>Matchup Debugger</h1>
+  <div class="card">
+    <div class="row">
+      <button id="btnNhl">NHL</button>
+      <button id="btnNfl">NFL</button>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <label>Home</label>
+      <select id="home"></select>
+      <label>Away</label>
+      <select id="away"></select>
+      <label>Start</label>
+      <input id="start" type="date" />
+      <label>End</label>
+      <input id="end" type="date" />
+      <button id="go">Analyze (debug)</button>
+    </div>
+  </div>
+
+  <div id="summary" class="card" style="display:none;"></div>
+  <div id="breakdown" class="card" style="display:none;"></div>
+  <div class="card">
+    <div class="row" style="justify-content: space-between; align-items:center;">
+      <h3 style="margin:0;">Raw JSON</h3>
+      <button id="toggleRaw">Show</button>
+    </div>
+    <pre id="raw" style="display:none;">{ }</pre>
+  </div>
+
+  <script>
+    const homeSel = document.getElementById('home');
+    const awaySel = document.getElementById('away');
+    const startInp = document.getElementById('start');
+    const endInp = document.getElementById('end');
+    const btnNhl = document.getElementById('btnNhl');
+    const btnNfl = document.getElementById('btnNfl');
+    const goBtn = document.getElementById('go');
+    const summaryEl = document.getElementById('summary');
+    const breakdownEl = document.getElementById('breakdown');
+    const toggleRawBtn = document.getElementById('toggleRaw');
+    const rawEl = document.getElementById('raw');
+    let sport = 'nhl';
+
+    function setSport(s) {
+      sport = s;
+      btnNhl.style.opacity = s === 'nhl' ? 1 : 0.6;
+      btnNfl.style.opacity = s === 'nfl' ? 1 : 0.6;
+      loadTeams();
+    }
+
+    async function loadTeams() {
+      try {
+        const res = await fetch(`/teams?sport=${sport}`);
+        const data = await res.json();
+        homeSel.innerHTML = '';
+        awaySel.innerHTML = '';
+        (data.teams || []).forEach(code => {
+          const opt1 = document.createElement('option');
+          opt1.value = code; opt1.textContent = code;
+          const opt2 = opt1.cloneNode(true);
+          homeSel.appendChild(opt1);
+          awaySel.appendChild(opt2);
+        });
+      } catch (err) {
+        summaryEl.style.display = 'block';
+        summaryEl.textContent = 'Error loading teams: ' + err;
+      }
+    }
+
+    function renderSummary(body) {
+      const side = body.side || {};
+      const probs = body.model_prob || {};
+      summaryEl.innerHTML = `
+        <div class="row" style="justify-content: space-between;">
+          <div>
+            <h3 style="margin:0;">${body.params.away} @ ${body.params.home}</h3>
+            <div class="row" style="gap:8px;">
+              <div>Home score: ${side.home_score?.toFixed(3)}</div>
+              <div>Away score: ${side.away_score?.toFixed(3)}</div>
+            </div>
+          </div>
+          <div>${side.lean || ''}</div>
+        </div>
+        <div class="row" style="gap:8px; margin-top:8px;">
+          <div>Model prob home: ${(probs.home*100).toFixed(2)}%</div>
+          <div>Model prob away: ${(probs.away*100).toFixed(2)}%</div>
+        </div>
+      `;
+      summaryEl.style.display = 'block';
+    }
+
+    function renderBreakdown(body) {
+      const dbg = body.side?.reasons?.debug;
+      if (!dbg) { breakdownEl.style.display = 'none'; return; }
+      const homeRows = (dbg.home_contribs || []).map(c => `<tr><td>${c.metric}</td><td>${c.value?.toFixed(3)}</td><td>${c.reason || ''}</td></tr>`).join('');
+      const awayRows = (dbg.away_contribs || []).map(c => `<tr><td>${c.metric}</td><td>${c.value?.toFixed(3)}</td><td>${c.reason || ''}</td></tr>`).join('');
+      breakdownEl.innerHTML = `
+        <h3>Contributions</h3>
+        <div class="grid grid-2">
+          <div>
+            <strong>Home</strong>
+            <table>${homeRows || '<tr><td colspan="3">None</td></tr>'}</table>
+          </div>
+          <div>
+            <strong>Away</strong>
+            <table>${awayRows || '<tr><td colspan="3">None</td></tr>'}</table>
+          </div>
+        </div>
+        <h3>Goalie</h3>
+        <pre>${JSON.stringify(dbg.goalie || {}, null, 2)}</pre>
+      `;
+      breakdownEl.style.display = 'block';
+    }
+
+    async function analyze() {
+      const params = new URLSearchParams();
+      params.set('home', homeSel.value);
+      params.set('away', awaySel.value);
+      if (startInp.value) params.set('start_date', startInp.value);
+      if (endInp.value) params.set('end_date', endInp.value);
+      params.set('debug', 'true');
+      try {
+        const res = await fetch(`/${sport}/matchup?` + params.toString());
+        const body = await res.json();
+        if (!res.ok) {
+          summaryEl.style.display = 'block';
+          summaryEl.textContent = 'Error: ' + (body.detail || res.statusText);
+          breakdownEl.style.display = 'none';
+          return;
+        }
+        rawEl.textContent = JSON.stringify(body, null, 2);
+        renderSummary(body);
+        renderBreakdown(body);
+      } catch (err) {
+        summaryEl.style.display = 'block';
+        summaryEl.textContent = 'Error: ' + err;
+        breakdownEl.style.display = 'none';
+      }
+    }
+
+    btnNhl.onclick = () => setSport('nhl');
+    btnNfl.onclick = () => setSport('nfl');
+    goBtn.onclick = analyze;
+    toggleRawBtn.onclick = () => {
+      rawEl.style.display = rawEl.style.display === 'block' ? 'none' : 'block';
+      toggleRawBtn.textContent = rawEl.style.display === 'block' ? 'Hide' : 'Show';
+    };
+
+    setSport('nhl');
+    loadTeams();
+  </script>
+</body>
+</html>

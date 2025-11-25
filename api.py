@@ -695,6 +695,7 @@ def _lean_scores(
     injuries_home=None,
     injuries_away=None,
     projected_goalies=None,
+    debug: bool = False,
 ) -> Tuple[float, float, dict]:
     """Pure version of the lean logic: returns scores + reasons."""
     today = _now_in_zone().date()
@@ -718,12 +719,25 @@ def _lean_scores(
     away_score = 0.0
     reasons_home = []
     reasons_away = []
+    contribs_home = []
+    contribs_away = []
+
+    def add(side: str, key: str, val: float, reason: str = None):
+        nonlocal home_score, away_score
+        if side == "home":
+            home_score += val
+            contribs_home.append({"metric": key, "value": val, "reason": reason})
+        else:
+            away_score += val
+            contribs_away.append({"metric": key, "value": val, "reason": reason})
 
     # Recency: use last 10 record as a single modest factor
     home_win10 = win_pct(home_profile["last10"])
     away_win10 = win_pct(away_profile["last10"])
     home_score += home_win10 * 1.0
     away_score += away_win10 * 1.0
+    contribs_home.append({"metric": "recency_win10", "value": home_win10 * 1.0})
+    contribs_away.append({"metric": "recency_win10", "value": away_win10 * 1.0})
     if home_win10 > away_win10 + 0.1:
         reasons_home.append("Better recent form (last 10)")
     elif away_win10 > home_win10 + 0.1:
@@ -738,20 +752,20 @@ def _lean_scores(
             delta_raw = 0.25 * length if stype == "W" else -0.25 * length
             delta = max(min(delta_raw, 0.75), -0.75)
             if is_home_flag:
-                home_score += delta
+                add("home", "streak", delta, f"streak {stype}{length}")
                 if stype == "W" and length >= 3:
                     reasons_home.append(f"On a {length}-game winning streak")
                 if stype == "L" and length >= 3:
                     reasons_home.append(f"On a {length}-game losing streak")
             else:
-                away_score += delta
+                add("away", "streak", delta, f"streak {stype}{length}")
                 if stype == "W" and length >= 3:
                     reasons_away.append(f"On a {length}-game winning streak")
                 if stype == "L" and length >= 3:
                     reasons_away.append(f"On a {length}-game losing streak")
 
     # Flat home-ice bonus (softened)
-    home_score += 0.25
+    add("home", "home_bonus", 0.25, "Home-ice advantage")
     reasons_home.append("Home-ice advantage")
 
     # Home/Road splits
@@ -763,13 +777,13 @@ def _lean_scores(
     home_home_win_pct = pct(home_home)
     away_road_win_pct = pct(away_road)
     if home_home["games"] > 0:
-        home_score += home_home_win_pct * 0.8
+        add("home", "home_split", home_home_win_pct * 0.8)
         if home_home_win_pct >= 0.55:
             reasons_home.append("Strong home record")
         elif home_home_win_pct <= 0.45:
             reasons_away.append("Home team weaker at home")
     if away_road["games"] > 0:
-        away_score += away_road_win_pct * 0.8
+        add("away", "road_split", away_road_win_pct * 0.8)
         if away_road_win_pct >= 0.55:
             reasons_away.append("Strong road record")
         elif away_road_win_pct <= 0.45:
@@ -779,10 +793,10 @@ def _lean_scores(
     home_ga10 = home_profile["last10"]["avg_against"]
     away_ga10 = away_profile["last10"]["avg_against"]
     if home_ga10 + 0.5 < away_ga10:
-        home_score += 0.2
+        add("home", "defense_ga", 0.2)
         reasons_home.append("Better defensive numbers (fewer goals against)")
     elif away_ga10 + 0.5 < home_ga10:
-        away_score += 0.2
+        add("away", "defense_ga", 0.2)
         reasons_away.append("Better defensive numbers (fewer goals against)")
 
     # Advanced stats edge (xG/HDCF) from MoneyPuck if available
@@ -791,10 +805,10 @@ def _lean_scores(
     if xgf_pct_home is not None and xgf_pct_away is not None:
         delta = xgf_pct_home - xgf_pct_away
         if delta >= 3.0:
-            home_score += 0.55
+            add("home", "xg_share", 0.55)
             reasons_home.append("Better xG share (season-to-date)")
         elif delta <= -3.0:
-            away_score += 0.55
+            add("away", "xg_share", 0.55)
             reasons_away.append("Better xG share (season-to-date)")
 
     # Special teams edge (PP/PK) if meaningful
@@ -808,10 +822,10 @@ def _lean_scores(
         net_away = (pp_away or 0) - (100 - (pk_away or 0))
         delta = net_home - net_away
         if delta >= 5:
-            home_score += 0.15
+            add("home", "special_teams", 0.15)
             reasons_home.append("Special teams edge")
         elif delta <= -5:
-            away_score += 0.15
+            add("away", "special_teams", 0.15)
             reasons_away.append("Special teams edge")
 
     # Rest / back-to-back
@@ -820,18 +834,18 @@ def _lean_scores(
     home_days = rest_home.get("days_since_last")
     away_days = rest_away.get("days_since_last")
     if rest_home.get("is_back_to_back") and not rest_away.get("is_back_to_back"):
-        home_score -= 0.40
+        add("home", "rest_b2b", -0.40)
         reasons_away.append("Home on back-to-back; away more rested")
     if rest_away.get("is_back_to_back") and not rest_home.get("is_back_to_back"):
-        away_score -= 0.40
+        add("away", "rest_b2b", -0.40)
         reasons_home.append("Away on back-to-back; home more rested")
     if home_days is not None and away_days is not None:
         diff = home_days - away_days
         if diff >= 2:
-            home_score += 0.20
+            add("home", "rest_gap", 0.20)
             reasons_home.append(f"More rest ({home_days}d vs {away_days}d)")
         elif diff <= -2:
-            away_score += 0.20
+            add("away", "rest_gap", 0.20)
             reasons_away.append(f"More rest ({away_days}d vs {home_days}d)")
 
     # Goalie edge (continuous + capped)
@@ -868,19 +882,32 @@ def _lean_scores(
             reasons_away.extend([f"Goalie: {r}" for r in away_g_reasons])
 
         if goalie_score > 0:
-            home_score += goalie_score
+            add("home", "goalie", goalie_score, "Goalie edge")
             reasons_home.append("Goalie edge (scaled/capped)")
         elif goalie_score < 0:
-            away_score += abs(goalie_score)
+            add("away", "goalie", abs(goalie_score), "Goalie edge")
             reasons_away.append("Goalie edge (scaled/capped)")
     except Exception as e:
         logger.exception("Goalie rating failed for %s vs %s", home_team, away_team)
         goalie_meta = {"error": "goalie_rating_failed", "detail": str(e)}
 
+    debug_block = None
+    if debug:
+        debug_block = {
+            "home_contribs": contribs_home,
+            "away_contribs": contribs_away,
+            "profiles": {"home": home_profile, "away": away_profile},
+            "adv": {"home": adv_home, "away": adv_away},
+            "goalie": goalie_meta,
+            "injuries": {"home": injuries_home, "away": injuries_away},
+            "temperature": 1.15,
+        }
+
     return home_score, away_score, {
         "home_reasons": reasons_home,
         "away_reasons": reasons_away,
         "goalie": goalie_meta,
+        "debug": debug_block,
     }
 
 
@@ -1264,6 +1291,7 @@ def nhl_matchup(
         description="If true, include injury lists per team (rotowire).",
     ),
     user: Optional[dict] = Depends(current_user_optional),
+    debug: bool = Query(False, description="If true, include debug breakdown"),
     ):
     # Defaults: last 45 days to keep fetches fast and recent
     now = _now_in_zone()
@@ -1368,6 +1396,7 @@ def nhl_matchup(
             injuries_home=home_inj_list,
             injuries_away=away_inj_list,
             projected_goalies=projected_goalies["items"] if projected_goalies else None,
+            debug=debug,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
