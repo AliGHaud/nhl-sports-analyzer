@@ -20,6 +20,7 @@ from typing import Dict, Optional
 TEAM_MAP: Dict[str, str] = {
     "anaheim": "ANA",
     "arizona": "ARI",
+    "arizonas": "ARI",  # occasional typo in raw dumps
     "boston": "BOS",
     "buffalo": "BUF",
     "carolina": "CAR",
@@ -47,6 +48,7 @@ TEAM_MAP: Dict[str, str] = {
     "sanjose": "SJS",
     "stlouis": "STL",
     "tampabay": "TBL",
+    "tampa": "TBL",
     "toronto": "TOR",
     "vancouver": "VAN",
     "vegas": "VGK",
