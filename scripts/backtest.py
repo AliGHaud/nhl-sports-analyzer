@@ -156,28 +156,58 @@ def backtest(
                 away_ml = float(odds["away_ml_close"])
                 implied_home = american_to_prob(home_ml)
                 implied_away = american_to_prob(away_ml)
-                edge = prob_home - implied_home
-                if prob_home >= prob_threshold and edge > min_edge:
+                bets = []
+                home_edge = prob_home - implied_home
+                if prob_home >= prob_threshold and home_edge > min_edge:
+                    bets.append(
+                        {
+                            "side": "home",
+                            "edge": home_edge,
+                            "prob": prob_home,
+                            "implied": implied_home,
+                            "line": home_ml,
+                            "win": outcome == 1,
+                            "other_implied": implied_away,
+                        }
+                    )
+                if prob_away >= prob_threshold and (prob_away - implied_away) > min_edge:
+                    bets.append(
+                        {
+                            "side": "away",
+                            "edge": prob_away - implied_away,
+                            "prob": prob_away,
+                            "implied": implied_away,
+                            "line": away_ml,
+                            "win": outcome == 0,
+                            "other_implied": implied_home,
+                        }
+                    )
+
+                for bet in bets:
                     bet_count += 1
-                    edge_sum += edge
+                    edge_sum += bet["edge"]
                     total_staked += stake
-                    decimal_odds = american_to_decimal(home_ml)
-                    win = outcome == 1
-                    if win:
+                    decimal_odds = american_to_decimal(bet["line"])
+                    if bet["win"]:
                         bet_wins += 1
                         profit = stake * (decimal_odds - 1.0)
                     else:
                         profit = -stake
                     total_profit += profit
-                    fav_key = "favorite" if implied_home >= implied_away else "underdog"
+                    fav_key = (
+                        "favorite"
+                        if bet["implied"] >= bet["other_implied"]
+                        else "underdog"
+                    )
                     fav_split[fav_key]["bets"] += 1
                     fav_split[fav_key]["profit"] += profit
-                    if win:
+                    if bet["win"]:
                         fav_split[fav_key]["wins"] += 1
-                    side_split["home"]["bets"] += 1
-                    side_split["home"]["profit"] += profit
-                    if win:
-                        side_split["home"]["wins"] += 1
+                    side_key = bet["side"]
+                    side_split[side_key]["bets"] += 1
+                    side_split[side_key]["profit"] += profit
+                    if bet["win"]:
+                        side_split[side_key]["wins"] += 1
 
     if total == 0:
         print("No usable games found.")
