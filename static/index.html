@@ -173,6 +173,7 @@
     const pickBtn = document.getElementById('pickBtn');
     const snapshotBtn = document.getElementById('snapshotBtn');
     const adminTokenInput = document.getElementById('adminToken');
+    const analyzerControls = document.getElementById('analyzerControls');
     const pickCard = document.getElementById('pickCard');
     const toggleRawBtn = document.getElementById('toggleRaw');
     const rawContainer = document.getElementById('raw');
@@ -793,6 +794,7 @@
     };
 
     async function verifyAdminToken(val = null) {
+      if (!analyzerControls) return;
       const token = val || adminTokenInput.value || '';
       if (!token) {
         analyzerControls.style.display = 'none';
