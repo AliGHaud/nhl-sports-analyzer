@@ -8,13 +8,24 @@ Custom dates:
   python scripts/backtest.py --start 2024-10-01 --end 2025-04-15
 """
 
+from __future__ import annotations
+
 import argparse
 import math
 from collections import defaultdict
+from pathlib import Path
 
 from data_sources import load_games_from_espn_date_range
 from api import _lean_scores
 from nhl_analyzer import model_probs_from_scores
+
+# Local helper for odds data
+SCRIPT_DIR = Path(__file__).resolve().parent
+import sys
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.append(str(SCRIPT_DIR))
+from odds_loader import load_clean_odds  # noqa: E402
 
 
 def log_loss(prob, outcome):
@@ -35,7 +46,27 @@ def bucket(prob, width=0.1):
     return f"{lo:.1f}-{hi:.1f}"
 
 
-def backtest(start_date: str, end_date: str):
+def american_to_prob(us: float) -> float:
+    if us is None:
+        raise ValueError("missing odds value")
+    if us > 0:
+        return 100.0 / (us + 100.0)
+    return -us / (-us + 100.0)
+
+
+def american_to_decimal(us: float) -> float:
+    if us > 0:
+        return us / 100.0 + 1.0
+    return 100.0 / (-us) + 1.0
+
+
+def calc_ev(prob: float, us_line: float) -> float:
+    """Expected value in units for a 1u bet."""
+    dec = american_to_decimal(us_line)
+    return prob * (dec - 1.0) - (1.0 - prob)
+
+
+def backtest(start_date: str, end_date: str, odds_file: str | None = None):
     games = load_games_from_espn_date_range(start_date, end_date, force_refresh=False)
     if not games:
         print("No games loaded for range", start_date, end_date)
@@ -47,6 +78,14 @@ def backtest(start_date: str, end_date: str):
     correct = 0
     buckets = defaultdict(lambda: {"n": 0, "wins": 0})
     failures = 0
+    odds_hits = 0
+    ev_sum = 0.0
+    edge_sum = 0.0
+    ev_count = 0
+
+    odds_lookup = {}
+    if odds_file:
+        odds_lookup = load_clean_odds(odds_file)
 
     for g in games:
         try:
@@ -83,6 +122,18 @@ def backtest(start_date: str, end_date: str):
         buckets[b]["n"] += 1
         buckets[b]["wins"] += outcome
 
+        if odds_lookup:
+            key = (g["date"], home, away)
+            odds = odds_lookup.get(key)
+            if odds and odds.get("home_ml_close") and odds.get("away_ml_close"):
+                odds_hits += 1
+                home_ml = float(odds["home_ml_close"])
+                implied_home = american_to_prob(home_ml)
+                edge = prob_home - implied_home
+                edge_sum += edge
+                ev_sum += calc_ev(prob_home, home_ml)
+                ev_count += 1
+
     if total == 0:
         print("No usable games found.")
         return
@@ -100,10 +151,19 @@ def backtest(start_date: str, end_date: str):
         win_rate = buckets[k]["wins"] / n
         print(f"  {k}: n={n}, actual_home_win={win_rate*100:.1f}%")
 
+    if odds_lookup:
+        print(f"\nOdds coverage: {odds_hits}/{total}")
+        if ev_count:
+            print(
+                f"Avg edge: {edge_sum/ev_count*100:.2f}% | "
+                f"Avg EV (1u): {ev_sum/ev_count:.3f}"
+            )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backtest NHL lean engine.")
     parser.add_argument("--start", default="2024-10-01", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", default="2025-04-15", help="End date YYYY-MM-DD")
+    parser.add_argument("--odds", help="Path to clean odds CSV (optional)")
     args = parser.parse_args()
-    backtest(args.start, args.end)
+    backtest(args.start, args.end, odds_file=args.odds)
