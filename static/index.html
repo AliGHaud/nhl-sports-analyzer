@@ -671,12 +671,7 @@
       toggleRawBtn.textContent = open ? 'Show' : 'Hide';
     });
     adminTokenInput.addEventListener('input', () => {
-      const val = adminTokenInput.value || '';
-      if (val.length > 0) {
-        analyzerControls.style.display = 'block';
-      } else {
-        analyzerControls.style.display = 'none';
-      }
+      verifyAdminToken();
     });
     snapshotBtn.addEventListener('click', async () => {
       const token = adminTokenInput.value || localStorage.getItem('adminToken');
@@ -710,7 +705,7 @@
       const savedToken = localStorage.getItem('adminToken');
       if (savedToken) {
         adminTokenInput.value = savedToken;
-        analyzerControls.style.display = 'block';
+        verifyAdminToken(savedToken);
       }
     } catch (e) {}
     modalClose.addEventListener('click', () => { modalBackdrop.style.display = 'none'; });
@@ -796,6 +791,25 @@
       if (idToken) headers.set('Authorization', `Bearer ${idToken}`);
       return origFetch(url, { ...opts, headers });
     };
+
+    async function verifyAdminToken(val = null) {
+      const token = val || adminTokenInput.value || '';
+      if (!token) {
+        analyzerControls.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch('/auth/admin_check', { headers: { 'x-admin-token': token } });
+        if (res.ok) {
+          analyzerControls.style.display = 'block';
+          localStorage.setItem('adminToken', token);
+        } else {
+          analyzerControls.style.display = 'none';
+        }
+      } catch (err) {
+        analyzerControls.style.display = 'none';
+      }
+    }
 
     onAuthStateChanged(auth, async (user) => {
       if (user) {

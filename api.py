@@ -1772,6 +1772,15 @@ def update_overrides(payload: OverridePayload, request: Request):
         "goalies": [entry.dict() for entry in payload.goalies],
     }
     _write_overrides(data)
+
+
+@app.get("/auth/admin_check")
+def admin_check(request: Request):
+    """
+    Return ok if valid admin token provided.
+    """
+    _require_admin(request)
+    return {"ok": True}
     return {"status": "ok", "overrides": data}
 
 
