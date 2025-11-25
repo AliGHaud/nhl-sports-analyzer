@@ -15,6 +15,8 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
+from datetime import datetime, timedelta
+
 from data_sources import load_games_from_espn_date_range
 from api import _lean_scores
 from nhl_analyzer import model_probs_from_scores
@@ -66,7 +68,13 @@ def calc_ev(prob: float, us_line: float) -> float:
     return prob * (dec - 1.0) - (1.0 - prob)
 
 
-def backtest(start_date: str, end_date: str, odds_file: str | None = None):
+def backtest(
+    start_date: str,
+    end_date: str,
+    odds_file: str | None = None,
+    min_edge: float = 0.05,
+    min_prob: float = 0.5,
+):
     games = load_games_from_espn_date_range(start_date, end_date, force_refresh=False)
     if not games:
         print("No games loaded for range", start_date, end_date)
@@ -81,7 +89,7 @@ def backtest(start_date: str, end_date: str, odds_file: str | None = None):
     odds_hits = 0
     ev_sum = 0.0
     edge_sum = 0.0
-    ev_count = 0
+    bet_count = 0
 
     odds_lookup = {}
     if odds_file:
@@ -123,8 +131,6 @@ def backtest(start_date: str, end_date: str, odds_file: str | None = None):
         buckets[b]["wins"] += outcome
 
         if odds_lookup:
-            from datetime import datetime, timedelta
-
             # Try exact date first, then ±1 day for timezone mismatches
             game_date = datetime.strptime(g["date"], "%Y-%m-%d")
             day_before = (game_date - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -142,9 +148,10 @@ def backtest(start_date: str, end_date: str, odds_file: str | None = None):
                 home_ml = float(odds["home_ml_close"])
                 implied_home = american_to_prob(home_ml)
                 edge = prob_home - implied_home
-                edge_sum += edge
-                ev_sum += calc_ev(prob_home, home_ml)
-                ev_count += 1
+                if prob_home >= min_prob and edge > min_edge:
+                    bet_count += 1
+                    edge_sum += edge
+                    ev_sum += calc_ev(prob_home, home_ml)
 
     if total == 0:
         print("No usable games found.")
@@ -165,11 +172,18 @@ def backtest(start_date: str, end_date: str, odds_file: str | None = None):
 
     if odds_lookup:
         print(f"\nOdds coverage: {odds_hits}/{total}")
-        if ev_count:
+        print(
+            f"Bet filter -> min_prob: {min_prob:.2f}, "
+            f"min_edge: {min_edge*100:.1f}% (prob - market)"
+        )
+        if bet_count:
+            print(f"Bets meeting filter: {bet_count}")
             print(
-                f"Avg edge: {edge_sum/ev_count*100:.2f}% | "
-                f"Avg EV (1u): {ev_sum/ev_count:.3f}"
+                f"Avg edge (filtered): {edge_sum/bet_count*100:.2f}% | "
+                f"Avg EV (1u): {ev_sum/bet_count:.3f}"
             )
+        else:
+            print("No games met the betting filter.")
 
 
 if __name__ == "__main__":
@@ -177,5 +191,23 @@ if __name__ == "__main__":
     parser.add_argument("--start", default="2024-10-01", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", default="2025-04-15", help="End date YYYY-MM-DD")
     parser.add_argument("--odds", help="Path to clean odds CSV (optional)")
+    parser.add_argument(
+        "--min-edge",
+        type=float,
+        default=0.05,
+        help="Minimum model edge (prob - market) required to count a bet (default 0.05)",
+    )
+    parser.add_argument(
+        "--min-prob",
+        type=float,
+        default=0.5,
+        help="Minimum model probability threshold required to count a bet (default 0.5)",
+    )
     args = parser.parse_args()
-    backtest(args.start, args.end, odds_file=args.odds)
+    backtest(
+        args.start,
+        args.end,
+        odds_file=args.odds,
+        min_edge=args.min_edge,
+        min_prob=args.min_prob,
+    )
