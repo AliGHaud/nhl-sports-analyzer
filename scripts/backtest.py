@@ -21,7 +21,11 @@ from typing import Dict, Any, List
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:  # fallback if tqdm not installed
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 from data_sources import load_games_from_espn_date_range
 from api import _lean_scores
@@ -189,6 +193,7 @@ def process_game(
             decimal_odds = american_to_decimal(line_value)
             profit = stake * (decimal_odds - 1.0) if win_flag else -stake
             fav_key = "favorite" if implied_value >= other_implied else "underdog"
+            ev_units = prob_value * (decimal_odds - 1.0) - (1 - prob_value)
             bet_result = {
                 "side": bet_side,
                 "edge": edge_value,
@@ -197,6 +202,8 @@ def process_game(
                 "fav_key": fav_key,
                 "prob": prob_value,
                 "stake": stake,
+                "ev": ev_units,
+                "decimal_odds": decimal_odds,
             }
 
     result = {
@@ -210,6 +217,9 @@ def process_game(
         "outcome": outcome,
         "odds_hit": odds_hit,
         "bet": bet_result,
+        "date": g.get("date"),
+        "home": home,
+        "away": away,
     }
     return result
 
@@ -230,6 +240,73 @@ def bucket(prob, width=0.1):
     lo = math.floor(prob / width) * width
     hi = lo + width
     return f"{lo:.1f}-{hi:.1f}"
+
+
+def calculate_potd_results(all_bets_by_date: Dict[str, List[Dict]]) -> Dict[str, Any]:
+    """Select highest EV bet per day and summarize results."""
+    potd_picks: List[Dict] = []
+
+    for game_date in sorted(all_bets_by_date.keys()):
+        day_bets = all_bets_by_date[game_date]
+        if not day_bets:
+            continue
+        best_bet = max(day_bets, key=lambda x: x.get("ev", 0))
+        best_bet = best_bet.copy()
+        best_bet["date"] = game_date
+        potd_picks.append(best_bet)
+
+    if not potd_picks:
+        return {
+            "total_days": 0,
+            "wins": 0,
+            "losses": 0,
+            "profit": 0.0,
+            "roi": 0.0,
+            "win_rate": 0.0,
+            "avg_odds": 0.0,
+            "best_streak": 0,
+            "worst_streak": 0,
+            "picks": [],
+        }
+
+    wins = sum(1 for p in potd_picks if p.get("win"))
+    losses = len(potd_picks) - wins
+    profit = sum(p.get("profit", 0.0) for p in potd_picks)
+    roi = (profit / len(potd_picks)) * 100 if potd_picks else 0.0
+    win_rate = (wins / len(potd_picks)) * 100 if potd_picks else 0.0
+    avg_odds = (
+        sum(p.get("decimal_odds", 0.0) for p in potd_picks) / len(potd_picks)
+        if potd_picks
+        else 0.0
+    )
+
+    best_streak = 0
+    worst_streak = 0
+    current_win_streak = 0
+    current_lose_streak = 0
+
+    for pick in potd_picks:
+        if pick.get("win"):
+            current_win_streak += 1
+            current_lose_streak = 0
+            best_streak = max(best_streak, current_win_streak)
+        else:
+            current_lose_streak += 1
+            current_win_streak = 0
+            worst_streak = max(worst_streak, current_lose_streak)
+
+    return {
+        "total_days": len(potd_picks),
+        "wins": wins,
+        "losses": losses,
+        "profit": profit,
+        "roi": roi,
+        "win_rate": win_rate,
+        "avg_odds": avg_odds,
+        "best_streak": best_streak,
+        "worst_streak": worst_streak,
+        "picks": potd_picks,
+    }
 
 
 def american_to_prob(us: float) -> float:
@@ -284,6 +361,8 @@ def backtest(
         "away": {"bets": 0, "wins": 0, "profit": 0.0},
     }
 
+    all_bets_by_date: Dict[str, List[Dict]] = defaultdict(list)
+
     odds_lookup = {}
     bet_calibration: Dict[str, Dict[str, float]] = defaultdict(
         lambda: {"bets": 0, "wins": 0}
@@ -337,6 +416,23 @@ def backtest(
             bet_calibration[bucket_key]["bets"] += 1
             if bet_info["win"]:
                 bet_calibration[bucket_key]["wins"] += 1
+
+            game_date = res.get("date")
+            if game_date:
+                all_bets_by_date[game_date].append(
+                    {
+                        "home": res.get("home"),
+                        "away": res.get("away"),
+                        "side": bet_info["side"],
+                        "ev": bet_info.get("ev", 0.0),
+                        "edge": bet_info["edge"],
+                        "prob": bet_info["prob"],
+                        "win": bet_info["win"],
+                        "profit": bet_info["profit"],
+                        "fav_key": bet_info["fav_key"],
+                        "decimal_odds": bet_info.get("decimal_odds", 0.0),
+                    }
+                )
 
     use_pool = processes > 1
     if use_pool:
@@ -414,6 +510,7 @@ def backtest(
             }
             for k, v in sorted(bet_calibration.items())
         },
+        "potd": None,
     }
 
     results_path = f"backtest_results_{start_date}_to_{end_date}_edge_{min_edge:.3f}.json"
@@ -491,6 +588,32 @@ def backtest(
                             f"  {label}: bets={stats['bets']}, "
                             f"hit={stats['hit_rate']*100:.1f}%"
                         )
+
+                potd_results = calculate_potd_results(all_bets_by_date)
+                if potd_results["total_days"]:
+                    print("\n" + "=" * 50)
+                    print("PICK OF THE DAY RESULTS (Highest EV per day)")
+                    print("=" * 50)
+                    print(
+                        f"POTD Record: {potd_results['wins']}-{potd_results['losses']}"
+                    )
+                    print(f"Win Rate: {potd_results['win_rate']:.1f}%")
+                    print(f"Profit: {potd_results['profit']:+.2f}u")
+                    print(f"ROI: {potd_results['roi']:+.2f}%")
+                    print(f"Avg Odds: {potd_results['avg_odds']:.2f}")
+                    print(f"Best Win Streak: {potd_results['best_streak']}")
+                    print(f"Worst Lose Streak: {potd_results['worst_streak']}")
+                    summary["potd"] = {
+                        "record": f"{potd_results['wins']}-{potd_results['losses']}",
+                        "wins": potd_results["wins"],
+                        "losses": potd_results["losses"],
+                        "win_rate": potd_results["win_rate"],
+                        "profit": potd_results["profit"],
+                        "roi": potd_results["roi"],
+                        "avg_odds": potd_results["avg_odds"],
+                        "best_streak": potd_results["best_streak"],
+                        "worst_streak": potd_results["worst_streak"],
+                    }
             else:
                 print("No games met the betting filter.")
 
