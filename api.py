@@ -59,6 +59,9 @@ from nhl_analyzer import (
     model_probs_from_scores,
     confidence_grade,
     DEFAULT_NHL_TEMPERATURE,
+    MIN_MODEL_PROBABILITY,
+    MIN_EDGE_FAVORITE,
+    MIN_EDGE_UNDERDOG,
 )
 from nfl_analyzer import (
     lean_matchup as nfl_lean_matchup,
@@ -1013,17 +1016,16 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
     if ev is None:
         return None
 
-    # Dynamic thresholds based on slate size
+    # Dynamic EV threshold based on slate size
     if slate_size <= 3:
         min_ev = 0.05
-        min_edge = 2.0
     elif slate_size <= 8:
         min_ev = 0.08
-        min_edge = 3.0
     else:
         min_ev = 0.10
-        min_edge = 4.0
-    min_model_prob = 0.55
+    min_model_prob = MIN_MODEL_PROBABILITY
+    fav_edge_requirement = MIN_EDGE_FAVORITE * 100.0
+    dog_edge_requirement = MIN_EDGE_UNDERDOG * 100.0
     max_juice = 150  # cap at -150/+150
 
     goalie_meta = reasons.get("goalie") if isinstance(reasons, dict) else None
@@ -1052,7 +1054,11 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
         # Filters for a viable pick
         if ev_units < min_ev:
             continue
-        if edge_pct < min_edge:
+        other_key = "away" if side_key == "home" else "home"
+        other_market_prob = ev["market_prob"][other_key]
+        is_favorite = market_prob >= other_market_prob
+        edge_required = fav_edge_requirement if is_favorite else dog_edge_requirement
+        if edge_pct < edge_required:
             continue
         if model_prob < min_model_prob:
             continue

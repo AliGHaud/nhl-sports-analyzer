@@ -15,7 +15,10 @@ from data_sources import (
 
 # Points to the folder where this script lives (not heavily used now, but kept)
 BASE_DIR = Path(__file__).parent
-DEFAULT_NHL_TEMPERATURE = 0.75
+DEFAULT_NHL_TEMPERATURE = 1.5
+MIN_MODEL_PROBABILITY = 0.5
+MIN_EDGE_FAVORITE = 0.05
+MIN_EDGE_UNDERDOG = 0.22
 
 
 # =========================
@@ -757,6 +760,20 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
     # Edges vs market
     home_edge_pct = (p_home_model - p_home_market) * 100.0
     away_edge_pct = (p_away_model - p_away_market) * 100.0
+    home_is_favorite = p_home_market >= p_away_market
+    away_is_favorite = p_away_market >= p_home_market
+    home_edge_required = (
+        MIN_EDGE_FAVORITE if home_is_favorite else MIN_EDGE_UNDERDOG
+    ) * 100.0
+    away_edge_required = (
+        MIN_EDGE_FAVORITE if away_is_favorite else MIN_EDGE_UNDERDOG
+    ) * 100.0
+    home_meets_filters = (
+        p_home_model >= MIN_MODEL_PROBABILITY and home_edge_pct >= home_edge_required
+    )
+    away_meets_filters = (
+        p_away_model >= MIN_MODEL_PROBABILITY and away_edge_pct >= away_edge_required
+    )
 
     print("\n--- Model vs Market ---")
     print(
@@ -790,18 +807,23 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
 
     # Simple recommendation based on EV (unchanged logic)
     print("\n--- Simple EV Lean ---")
-    if home_ev > 0 and home_ev > away_ev:
+    if home_ev > 0 and home_ev > away_ev and home_meets_filters:
         print(
             f"Model shows +EV on {home_team} moneyline "
             f"(best EV of the two sides)."
         )
-    elif away_ev > 0 and away_ev > home_ev:
+    elif away_ev > 0 and away_ev > home_ev and away_meets_filters:
         print(
             f"Model shows +EV on {away_team} moneyline "
             f"(best EV of the two sides)."
         )
     elif home_ev <= 0 and away_ev <= 0:
         print("Model does NOT see a clear +EV edge on either moneyline side.")
+    elif not home_meets_filters and not away_meets_filters:
+        print(
+            "Model EV exists but neither side meets the probability/edge filters "
+            "(fav edge >= 5%, dog edge >= 22%)."
+        )
     else:
         print("EV is mixed. Neither side is clearly dominant by EV alone.")
 
@@ -817,8 +839,8 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
     best_market_prob = None
     best_odds = None
 
-    if home_ev > 0 or away_ev > 0:
-        if home_ev > away_ev:
+    if (home_ev > 0 and home_meets_filters) or (away_ev > 0 and away_meets_filters):
+        if home_ev > away_ev and home_meets_filters:
             best_team = home_team
             best_ev = home_ev
             best_edge = home_edge_pct
@@ -826,7 +848,7 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
             best_model_prob = p_home_model
             best_market_prob = p_home_market
             best_odds = home_odds
-        else:
+        elif away_meets_filters:
             best_team = away_team
             best_ev = away_ev
             best_edge = away_edge_pct

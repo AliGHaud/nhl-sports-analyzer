@@ -97,6 +97,7 @@ def process_game(
     games: List[dict],
     odds_lookup: Dict,
     min_edge: float,
+    min_edge_dog: float,
     prob_threshold: float,
     stake: float,
     cache_scores: bool = False,
@@ -154,9 +155,14 @@ def process_game(
         win_flag = False
         other_implied = 0.0
 
+        home_is_favorite = implied_home >= implied_away
+        away_is_favorite = implied_away >= implied_home
+        home_edge_required = min_edge if home_is_favorite else min_edge_dog
+        away_edge_required = min_edge if away_is_favorite else min_edge_dog
+
         if (
             prob_home >= prob_threshold
-            and home_edge > min_edge
+            and home_edge > home_edge_required
             and home_edge > away_edge
         ):
             bet_side = "home"
@@ -168,7 +174,7 @@ def process_game(
             other_implied = implied_away
         elif (
             prob_away >= prob_threshold
-            and away_edge > min_edge
+            and away_edge > away_edge_required
             and away_edge > home_edge
         ):
             bet_side = "away"
@@ -245,6 +251,7 @@ def backtest(
     end_date: str,
     odds_file: str | None = None,
     min_edge: float = 0.05,
+    min_edge_dog: float = 0.22,
     min_prob: float = 0.5,
     stake: float = 1.0,
     processes: int = 1,
@@ -338,6 +345,7 @@ def backtest(
             games=games,
             odds_lookup=odds_lookup,
             min_edge=min_edge,
+            min_edge_dog=min_edge_dog,
             prob_threshold=prob_threshold,
             stake=stake,
             cache_scores=False,
@@ -361,6 +369,7 @@ def backtest(
                 games,
                 odds_lookup,
                 min_edge,
+                min_edge_dog,
                 prob_threshold,
                 stake,
                 cache_scores=True,
@@ -431,7 +440,7 @@ def backtest(
             print(f"\nOdds coverage: {odds_hits}/{total}")
             print(
                 f"Bet filter -> stake: {stake:.2f}u, min_prob: {prob_threshold:.2f}, "
-                f"min_edge: {min_edge*100:.1f}%"
+                f"min_edge: {min_edge*100:.1f}% (fav), {min_edge_dog*100:.1f}% (dog)"
             )
             if bet_count:
                 avg_edge_pct = summary["bet_results"]["avg_edge"] * 100.0
@@ -496,6 +505,7 @@ def run_edge_sweep(
     min_prob: float,
     stake: float,
     processes: int = 1,
+    min_edge_dog: float = 0.22,
 ) -> List[Dict[str, Any]]:
     print(f"\nRunning edge sweep for {edges}")
     results = []
@@ -505,6 +515,7 @@ def run_edge_sweep(
             end_date,
             odds_file=odds_file,
             min_edge=edge,
+            min_edge_dog=min_edge_dog,
             min_prob=min_prob,
             stake=stake,
             processes=processes,
@@ -540,6 +551,12 @@ if __name__ == "__main__":
         help="Minimum model probability threshold required to count a bet (default 0.5)",
     )
     parser.add_argument(
+        "--min-edge-dog",
+        type=float,
+        default=0.22,
+        help="Minimum edge for underdog bets (default 0.22 = 22%)",
+    )
+    parser.add_argument(
         "--stake",
         type=float,
         default=1.0,
@@ -573,6 +590,7 @@ if __name__ == "__main__":
                 args.end,
                 odds_file=args.odds,
                 min_edge=args.min_edge,
+                min_edge_dog=args.min_edge_dog,
                 min_prob=args.min_prob,
                 stake=args.stake,
                 processes=args.processes,
@@ -586,6 +604,7 @@ if __name__ == "__main__":
                 min_prob=args.min_prob,
                 stake=args.stake,
                 processes=args.processes,
+                min_edge_dog=args.min_edge_dog,
             )
     else:
         backtest(
@@ -593,6 +612,7 @@ if __name__ == "__main__":
             args.end,
             odds_file=args.odds,
             min_edge=args.min_edge,
+            min_edge_dog=args.min_edge_dog,
             min_prob=args.min_prob,
             stake=args.stake,
             processes=args.processes,
