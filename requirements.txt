@@ -6,3 +6,4 @@ httpx
 tzdata
 firebase-admin
 tqdm
+nfl_data_py
