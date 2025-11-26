@@ -15,6 +15,7 @@ from data_sources import (
 
 # Points to the folder where this script lives (not heavily used now, but kept)
 BASE_DIR = Path(__file__).parent
+DEFAULT_NHL_TEMPERATURE = 0.75
 
 
 # =========================
@@ -435,10 +436,10 @@ def profit_on_win_for_1_unit(odds):
         return odds / 100.0
 
 
-def model_probs_from_scores(home_score, away_score, temperature=1.15):
+def model_probs_from_scores(home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE):
     """
     Convert home/away scores into probabilities via softmax with optional temperature.
-    Higher temperature (>1) softens extremes.
+    Higher temperature (>1) softens extremes; lower (<1) sharpens them.
     """
     t = max(float(temperature), 1e-6)
     eh = math.exp(home_score / t)
@@ -737,7 +738,9 @@ def run_betting_edge_section(home_team, away_team, home_score, away_score):
             return
 
     # Model probabilities from scores
-    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score, temperature=1.15)
+    p_home_model, p_away_model = model_probs_from_scores(
+        home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+    )
 
     # Market implied probabilities from odds
     p_home_market = implied_prob_american(home_odds)

@@ -58,6 +58,7 @@ from nhl_analyzer import (
     profit_on_win_for_1_unit,
     model_probs_from_scores,
     confidence_grade,
+    DEFAULT_NHL_TEMPERATURE,
 )
 from nfl_analyzer import (
     lean_matchup as nfl_lean_matchup,
@@ -400,7 +401,9 @@ def _snapshot_all_matchups_for_date(
         except Exception:
             continue
 
-        model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
+        model_home_prob, model_away_prob = model_probs_from_scores(
+            home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+        )
         ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)
 
         diff = home_score - away_score
@@ -900,7 +903,7 @@ def _lean_scores(
             "adv": {"home": adv_home, "away": adv_away},
             "goalie": goalie_meta,
             "injuries": {"home": injuries_home, "away": injuries_away},
-            "temperature": 1.15,
+            "temperature": DEFAULT_NHL_TEMPERATURE,
         }
 
     return home_score, away_score, {
@@ -926,7 +929,9 @@ def _ev_block(home_team, away_team, home_score, away_score, force_refresh=False)
         logger.info("[EV] Odds missing fields for %s vs %s", home_team, away_team)
         return None
 
-    p_home_model, p_away_model = model_probs_from_scores(home_score, away_score, temperature=1.15)
+    p_home_model, p_away_model = model_probs_from_scores(
+        home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+    )
     p_home_market = implied_prob_american(home_odds)
     p_away_market = implied_prob_american(away_odds)
     home_profit = profit_on_win_for_1_unit(home_odds)
@@ -1180,7 +1185,9 @@ def nfl_matchup(
     home_score, away_score, reasons = nfl_lean_matchup(home.upper(), away.upper(), games)
     if home_score is None:
         raise HTTPException(status_code=400, detail="Not enough data")
-    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
+    model_home_prob, model_away_prob = model_probs_from_scores(
+        home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+    )
     ev = None
     odds = load_odds_nfl(home.upper(), away.upper())
     if odds and odds.get("home_ml") is not None and odds.get("away_ml") is not None:
@@ -1403,7 +1410,9 @@ def nhl_matchup(
         raise HTTPException(status_code=400, detail=str(e))
 
     # Always expose model win probabilities, even if odds/EV are unavailable.
-    model_home_prob, model_away_prob = model_probs_from_scores(home_score, away_score, temperature=1.15)
+    model_home_prob, model_away_prob = model_probs_from_scores(
+        home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+    )
     model_probs = {"home": model_home_prob, "away": model_away_prob}
 
     ev = _ev_block(home, away, home_score, away_score, force_refresh=force_refresh)

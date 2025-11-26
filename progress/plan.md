@@ -19,7 +19,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
 - UI: goalie impact card on main and modal views shows ratings/start prob/rest penalty/score contrib without raw JSON.
 - Startup cache cleanup: projected goalie caches and all matchup snapshots are cleared on startup to avoid stale projections after redeploys.
-- Lean tuning: softened weights (home/xG/rest/GA/ST), temperature-scaled probabilities (1.15), and reduced goalie impact to improve calibration; CLI lean aligned with API (xG/rest/goalie/temperature).
+- Lean tuning: softened weights (home/xG/rest/GA/ST), temperature-scaled probabilities (0.75), and reduced goalie impact to improve calibration; CLI lean aligned with API (xG/rest/goalie/temperature).
 - Pick filters/tests: tightened pick filters (model prob floor, edge/EV thresholds, odds cap, goalie certainty, slate-based thresholds) and added pytest coverage for lean/probability softening and pick filters.
 - Auth scaffolding: added Firebase frontend wiring (Google login, ID token attachment to API calls), Firebase admin init, and `/auth/me` status endpoint; env/config placeholders ready for enforcement/gating.
 - Optional auth gating: `/nhl/pick` enforces auth/pro tier when env flags are set; matchup/team/today accept auth dependency for future gating.
