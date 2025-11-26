@@ -18,6 +18,8 @@ from pathlib import Path
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
+from functools import partial
+from multiprocessing import Pool, cpu_count
 
 from tqdm import tqdm
 
@@ -56,6 +58,154 @@ def calibration_bucket_label(prob: float, step: float = 0.05) -> str:
     lo = max(0.0, math.floor(prob / step) * step)
     hi = min(1.0, lo + step)
     return f"{lo:.2f}-{hi:.2f}"
+
+
+def find_odds_for_game(game: dict, odds_lookup: Dict) -> dict | None:
+    """Return odds entry for a game, checking +/- one day for timezone drift."""
+    if not odds_lookup:
+        return None
+    home = game.get("home_team")
+    away = game.get("away_team")
+    try:
+        game_date = datetime.strptime(game["date"], "%Y-%m-%d")
+    except Exception:
+        return None
+
+    for offset in [0, -1, 1]:
+        check_date = (game_date + timedelta(days=offset)).strftime("%Y-%m-%d")
+        key = (check_date, home, away)
+        odds = odds_lookup.get(key)
+        if odds and odds.get("home_ml_close") and odds.get("away_ml_close"):
+            return odds
+    return None
+
+
+def prefilter_games_with_odds(games: List[dict], odds_lookup: Dict) -> List[dict]:
+    """Filter the games list to only those where we find a matching odds entry."""
+    if not odds_lookup:
+        return games
+    filtered = []
+    for g in games:
+        if find_odds_for_game(g, odds_lookup):
+            filtered.append(g)
+    print(f"Pre-filtered to {len(filtered)} games with odds data")
+    return filtered
+
+
+def process_game(
+    g: dict,
+    games: List[dict],
+    odds_lookup: Dict,
+    min_edge: float,
+    prob_threshold: float,
+    stake: float,
+    cache_scores: bool = False,
+    score_cache: Dict | None = None,
+):
+    """Process a single game's metrics and optional bet."""
+    try:
+        home = g["home_team"]
+        away = g["away_team"]
+        hg = int(g["home_goals"])
+        ag = int(g["away_goals"])
+    except Exception:
+        return {"skip": True, "failure": False}
+
+    outcome = 1 if hg > ag else 0
+
+    cache_key = (home, away, g.get("date"))
+    try:
+        if cache_scores and score_cache is not None and cache_key in score_cache:
+            home_score, away_score = score_cache[cache_key]
+        else:
+            home_score, away_score, _ = _lean_scores(
+                home,
+                away,
+                games,
+                force_refresh=False,
+                injuries_home=None,
+                injuries_away=None,
+                projected_goalies=None,
+            )
+            if cache_scores and score_cache is not None:
+                score_cache[cache_key] = (home_score, away_score)
+    except Exception:
+        return {"skip": True, "failure": True}
+
+    prob_home, prob_away = model_probs_from_scores(home_score, away_score)
+    odds_entry = find_odds_for_game(g, odds_lookup) if odds_lookup else None
+    odds_hit = bool(odds_entry)
+    bet_result = None
+
+    if odds_entry:
+        home_ml = float(odds_entry["home_ml_close"])
+        away_ml = float(odds_entry["away_ml_close"])
+        implied_home = american_to_prob(home_ml)
+        implied_away = american_to_prob(away_ml)
+
+        home_edge = prob_home - implied_home
+        away_edge = prob_away - implied_away
+
+        bet_side = None
+        edge_value = 0.0
+        prob_value = 0.0
+        implied_value = 0.0
+        line_value = 0.0
+        win_flag = False
+        other_implied = 0.0
+
+        if (
+            prob_home >= prob_threshold
+            and home_edge > min_edge
+            and home_edge > away_edge
+        ):
+            bet_side = "home"
+            edge_value = home_edge
+            prob_value = prob_home
+            implied_value = implied_home
+            line_value = home_ml
+            win_flag = outcome == 1
+            other_implied = implied_away
+        elif (
+            prob_away >= prob_threshold
+            and away_edge > min_edge
+            and away_edge > home_edge
+        ):
+            bet_side = "away"
+            edge_value = away_edge
+            prob_value = prob_away
+            implied_value = implied_away
+            line_value = away_ml
+            win_flag = outcome == 0
+            other_implied = implied_home
+
+        if bet_side:
+            decimal_odds = american_to_decimal(line_value)
+            profit = stake * (decimal_odds - 1.0) if win_flag else -stake
+            fav_key = "favorite" if implied_value >= other_implied else "underdog"
+            bet_result = {
+                "side": bet_side,
+                "edge": edge_value,
+                "win": win_flag,
+                "profit": profit,
+                "fav_key": fav_key,
+                "prob": prob_value,
+                "stake": stake,
+            }
+
+    result = {
+        "skip": False,
+        "failure": False,
+        "correct": (prob_home >= 0.5 and outcome == 1)
+        or (prob_home < 0.5 and outcome == 0),
+        "ll": log_loss(prob_home, outcome),
+        "brier": brier(prob_home, outcome),
+        "bucket": bucket(prob_home),
+        "outcome": outcome,
+        "odds_hit": odds_hit,
+        "bet": bet_result,
+    }
+    return result
 
 
 def log_loss(prob, outcome):
@@ -97,12 +247,14 @@ def backtest(
     min_edge: float = 0.05,
     min_prob: float = 0.5,
     stake: float = 1.0,
+    processes: int = 1,
     quiet: bool = False,
 ) -> Dict[str, Any]:
     games = load_games_from_espn_date_range(start_date, end_date, force_refresh=False)
     if not games:
         print("No games loaded for range", start_date, end_date)
         return {}
+    score_cache: Dict = {}
 
     total = 0
     ll_sum = 0.0
@@ -133,130 +285,88 @@ def backtest(
     if odds_file:
         odds_lookup = load_clean_odds(odds_file)
         validate_backtest_input(odds_lookup, start_date, end_date)
+        games = prefilter_games_with_odds(games, odds_lookup)
 
     prob_threshold = max(min_prob, 0.5)
 
-    iterator = games
-    if not quiet:
-        iterator = tqdm(games, desc="Backtesting", unit="game")
+    processes = int(processes or 1)
+    if processes <= 0:
+        processes = cpu_count()
 
-    for g in iterator:
-        try:
-            home = g["home_team"]
-            away = g["away_team"]
-            hg = int(g["home_goals"])
-            ag = int(g["away_goals"])
-        except Exception:
-            continue
-
-        outcome = 1 if hg > ag else 0  # home win = 1
-
-        try:
-            home_score, away_score, _ = _lean_scores(
-                home,
-                away,
-                games,
-                force_refresh=False,
-                injuries_home=None,
-                injuries_away=None,
-                projected_goalies=None,
-            )
-        except Exception:
-            failures += 1
-            continue
-
-        prob_home, prob_away = model_probs_from_scores(home_score, away_score)
+    def apply_result(res: Dict[str, Any]):
+        nonlocal total, correct, ll_sum, brier_sum, failures, odds_hits, bet_count, bet_wins, edge_sum, total_profit, total_staked
+        if not res or res.get("skip"):
+            if res.get("failure"):
+                failures += 1
+            return
         total += 1
-        correct += 1 if (prob_home >= 0.5 and outcome == 1) or (prob_home < 0.5 and outcome == 0) else 0
-        ll_sum += log_loss(prob_home, outcome)
-        brier_sum += brier(prob_home, outcome)
+        correct += 1 if res["correct"] else 0
+        ll_sum += res["ll"]
+        brier_sum += res["brier"]
+        bucket_label = res["bucket"]
+        buckets[bucket_label]["n"] += 1
+        buckets[bucket_label]["wins"] += res["outcome"]
+        if res["odds_hit"]:
+            odds_hits += 1
+        bet_info = res.get("bet")
+        if bet_info:
+            bet_count += 1
+            edge_sum += bet_info["edge"]
+            total_staked += bet_info["stake"]
+            total_profit += bet_info["profit"]
+            if bet_info["win"]:
+                bet_wins += 1
+            fav_key = bet_info["fav_key"]
+            fav_split[fav_key]["bets"] += 1
+            fav_split[fav_key]["profit"] += bet_info["profit"]
+            if bet_info["win"]:
+                fav_split[fav_key]["wins"] += 1
+            side_key = bet_info["side"]
+            side_split[side_key]["bets"] += 1
+            side_split[side_key]["profit"] += bet_info["profit"]
+            if bet_info["win"]:
+                side_split[side_key]["wins"] += 1
+            bucket_key = calibration_bucket_label(bet_info["prob"])
+            bet_calibration[bucket_key]["bets"] += 1
+            if bet_info["win"]:
+                bet_calibration[bucket_key]["wins"] += 1
 
-        b = bucket(prob_home)
-        buckets[b]["n"] += 1
-        buckets[b]["wins"] += outcome
-
-        if odds_lookup:
-            # Try exact date first, then ±1 day for timezone mismatches
-            game_date = datetime.strptime(g["date"], "%Y-%m-%d")
-            day_before = (game_date - timedelta(days=1)).strftime("%Y-%m-%d")
-            day_after = (game_date + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            odds = None
-            for date_key in [g["date"], day_before, day_after]:
-                key = (date_key, home, away)
-                if key in odds_lookup:
-                    odds = odds_lookup[key]
-                    break
-
-            if odds and odds.get("home_ml_close") and odds.get("away_ml_close"):
-                odds_hits += 1
-                home_ml = float(odds["home_ml_close"])
-                away_ml = float(odds["away_ml_close"])
-                implied_home = american_to_prob(home_ml)
-                implied_away = american_to_prob(away_ml)
-
-                home_edge = prob_home - implied_home
-                away_edge = prob_away - implied_away
-
-                bet = None
-                if (
-                    prob_home >= prob_threshold
-                    and home_edge > min_edge
-                    and home_edge > away_edge
-                ):
-                    bet = {
-                        "side": "home",
-                        "edge": home_edge,
-                        "prob": prob_home,
-                        "implied": implied_home,
-                        "line": home_ml,
-                        "win": outcome == 1,
-                        "other_implied": implied_away,
-                    }
-                elif (
-                    prob_away >= prob_threshold
-                    and away_edge > min_edge
-                    and away_edge > home_edge
-                ):
-                    bet = {
-                        "side": "away",
-                        "edge": away_edge,
-                        "prob": prob_away,
-                        "implied": implied_away,
-                        "line": away_ml,
-                        "win": outcome == 0,
-                        "other_implied": implied_home,
-                    }
-
-                if bet:
-                    bet_count += 1
-                    edge_sum += bet["edge"]
-                    total_staked += stake
-                    decimal_odds = american_to_decimal(bet["line"])
-                    if bet["win"]:
-                        bet_wins += 1
-                        profit = stake * (decimal_odds - 1.0)
-                    else:
-                        profit = -stake
-                    total_profit += profit
-                    fav_key = (
-                        "favorite"
-                        if bet["implied"] >= bet["other_implied"]
-                        else "underdog"
-                    )
-                    fav_split[fav_key]["bets"] += 1
-                    fav_split[fav_key]["profit"] += profit
-                    if bet["win"]:
-                        fav_split[fav_key]["wins"] += 1
-                    side_key = bet["side"]
-                    side_split[side_key]["bets"] += 1
-                    side_split[side_key]["profit"] += profit
-                    if bet["win"]:
-                        side_split[side_key]["wins"] += 1
-                    bucket_key = calibration_bucket_label(bet["prob"])
-                    bet_calibration[bucket_key]["bets"] += 1
-                    if bet["win"]:
-                        bet_calibration[bucket_key]["wins"] += 1
+    use_pool = processes > 1
+    if use_pool:
+        process_func = partial(
+            process_game,
+            games=games,
+            odds_lookup=odds_lookup,
+            min_edge=min_edge,
+            prob_threshold=prob_threshold,
+            stake=stake,
+            cache_scores=False,
+            score_cache=None,
+        )
+        with Pool(processes=processes) as pool:
+            pool_iter = pool.imap(process_func, games)
+            if not quiet:
+                pool_iter = tqdm(
+                    pool_iter, total=len(games), desc="Backtesting", unit="game"
+                )
+            for res in pool_iter:
+                apply_result(res)
+    else:
+        iterator = games
+        if not quiet:
+            iterator = tqdm(games, desc="Backtesting", unit="game")
+        for g in iterator:
+            res = process_game(
+                g,
+                games,
+                odds_lookup,
+                min_edge,
+                prob_threshold,
+                stake,
+                cache_scores=True,
+                score_cache=score_cache,
+            )
+            apply_result(res)
 
     if total == 0:
         print("No usable games found.")
@@ -385,6 +495,7 @@ def run_edge_sweep(
     edges: List[float],
     min_prob: float,
     stake: float,
+    processes: int = 1,
 ) -> List[Dict[str, Any]]:
     print(f"\nRunning edge sweep for {edges}")
     results = []
@@ -396,6 +507,7 @@ def run_edge_sweep(
             min_edge=edge,
             min_prob=min_prob,
             stake=stake,
+            processes=processes,
             quiet=True,
         )
         if result:
@@ -434,6 +546,12 @@ if __name__ == "__main__":
         help="Flat stake (units) for each qualifying bet (default 1.0)",
     )
     parser.add_argument(
+        "--processes",
+        type=int,
+        default=1,
+        help="Number of worker processes for multiprocessing (default 1).",
+    )
+    parser.add_argument(
         "--edge-sweep",
         help="Comma-separated list of edge thresholds to evaluate (e.g., 0.01,0.03,0.05).",
     )
@@ -457,6 +575,7 @@ if __name__ == "__main__":
                 min_edge=args.min_edge,
                 min_prob=args.min_prob,
                 stake=args.stake,
+                processes=args.processes,
             )
         else:
             run_edge_sweep(
@@ -466,6 +585,7 @@ if __name__ == "__main__":
                 edges=sweep_values,
                 min_prob=args.min_prob,
                 stake=args.stake,
+                processes=args.processes,
             )
     else:
         backtest(
@@ -475,4 +595,5 @@ if __name__ == "__main__":
             min_edge=args.min_edge,
             min_prob=args.min_prob,
             stake=args.stake,
+            processes=args.processes,
         )
