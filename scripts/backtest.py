@@ -156,34 +156,41 @@ def backtest(
                 away_ml = float(odds["away_ml_close"])
                 implied_home = american_to_prob(home_ml)
                 implied_away = american_to_prob(away_ml)
-                bets = []
-                home_edge = prob_home - implied_home
-                if prob_home >= prob_threshold and home_edge > min_edge:
-                    bets.append(
-                        {
-                            "side": "home",
-                            "edge": home_edge,
-                            "prob": prob_home,
-                            "implied": implied_home,
-                            "line": home_ml,
-                            "win": outcome == 1,
-                            "other_implied": implied_away,
-                        }
-                    )
-                if prob_away >= prob_threshold and (prob_away - implied_away) > min_edge:
-                    bets.append(
-                        {
-                            "side": "away",
-                            "edge": prob_away - implied_away,
-                            "prob": prob_away,
-                            "implied": implied_away,
-                            "line": away_ml,
-                            "win": outcome == 0,
-                            "other_implied": implied_home,
-                        }
-                    )
 
-                for bet in bets:
+                home_edge = prob_home - implied_home
+                away_edge = prob_away - implied_away
+
+                bet = None
+                if (
+                    prob_home >= prob_threshold
+                    and home_edge > min_edge
+                    and home_edge > away_edge
+                ):
+                    bet = {
+                        "side": "home",
+                        "edge": home_edge,
+                        "prob": prob_home,
+                        "implied": implied_home,
+                        "line": home_ml,
+                        "win": outcome == 1,
+                        "other_implied": implied_away,
+                    }
+                elif (
+                    prob_away >= prob_threshold
+                    and away_edge > min_edge
+                    and away_edge > home_edge
+                ):
+                    bet = {
+                        "side": "away",
+                        "edge": away_edge,
+                        "prob": prob_away,
+                        "implied": implied_away,
+                        "line": away_ml,
+                        "win": outcome == 0,
+                        "other_implied": implied_home,
+                    }
+
+                if bet:
                     bet_count += 1
                     edge_sum += bet["edge"]
                     total_staked += stake
