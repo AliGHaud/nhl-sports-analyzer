@@ -66,10 +66,13 @@ TEAM_MAP: Dict[str, str] = {
     "jaguars": "JAX",
     "kansascitychiefs": "KC",
     "kansascity": "KC",
+    "kansas": "KC",
     "chiefs": "KC",
+    "kcchiefs": "KC",
     "lasvegasraiders": "LV",
     "lasvegas": "LV",
     "raiders": "LV",
+    "lvraiders": "LV",
     "oaklandraiders": "LV",
     "oakland": "LV",
     "losangeleschargers": "LAC",
@@ -114,12 +117,14 @@ TEAM_MAP: Dict[str, str] = {
     "seahawks": "SEA",
     "tampabaybuccaneers": "TB",
     "tampabay": "TB",
+    "tampa": "TB",
     "buccaneers": "TB",
     "tennesseetitans": "TEN",
     "tennessee": "TEN",
     "titans": "TEN",
     "washingtoncommanders": "WAS",
     "washington": "WAS",
+    "washingtom": "WAS",
     "commanders": "WAS",
     "washingtonfootballteam": "WAS",
     "washingtonredskins": "WAS",
@@ -188,17 +193,34 @@ def ingest(raw_path: str, out_path: str, season_start_year: int) -> None:
 
             side_prefix = "home" if vh.upper() == "H" else "away"
             entry[f"{side_prefix}_team"] = team_code
-            entry[f"{side_prefix}_score"] = int(row[7]) if row[7] else None
-            entry[f"{side_prefix}_ml_open"] = parse_float(row[8])
-            entry[f"{side_prefix}_ml_close"] = parse_float(row[9])
-            entry[f"{side_prefix}_spread"] = parse_float(row[10])
-            entry[f"{side_prefix}_spread_price"] = parse_float(row[11])
+            if len(row) >= 16:
+                # Standard SBR format with spread/total columns
+                entry[f"{side_prefix}_score"] = int(row[7]) if row[7] else None
+                entry[f"{side_prefix}_ml_open"] = parse_float(row[8])
+                entry[f"{side_prefix}_ml_close"] = parse_float(row[9])
+                entry[f"{side_prefix}_spread"] = parse_float(row[10])
+                entry[f"{side_prefix}_spread_price"] = parse_float(row[11])
 
-            if side_prefix == "away":
-                entry["total_open"] = parse_float(row[12])
-                entry["total_open_price"] = parse_float(row[13])
-                entry["total_close"] = parse_float(row[14])
-                entry["total_close_price"] = parse_float(row[15])
+                if side_prefix == "away":
+                    entry["total_open"] = parse_float(row[12])
+                    entry["total_open_price"] = parse_float(row[13])
+                    entry["total_close"] = parse_float(row[14])
+                    entry["total_close_price"] = parse_float(row[15])
+            elif len(row) >= 13:
+                # Slim format (e.g., NFL files with ML only)
+                entry[f"{side_prefix}_score"] = int(row[8]) if row[8] else None
+                entry[f"{side_prefix}_ml_open"] = None
+                entry[f"{side_prefix}_ml_close"] = parse_float(row[11])
+                entry[f"{side_prefix}_spread"] = None
+                entry[f"{side_prefix}_spread_price"] = None
+
+                if side_prefix == "away":
+                    entry["total_open"] = parse_float(row[9])
+                    entry["total_open_price"] = None
+                    entry["total_close"] = parse_float(row[10])
+                    entry["total_close_price"] = None
+            else:
+                raise ValueError(f"Unexpected row length {len(row)} in {row}")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fieldnames = [
