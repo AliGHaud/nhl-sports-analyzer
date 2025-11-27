@@ -216,35 +216,48 @@ def ingest(raw_path: str, out_path: str, season_start_year: int) -> None:
                 entry[f"{side_prefix}_score"] = int(row[8]) if row[8] else None
                 entry[f"{side_prefix}_ml_open"] = None
                 entry[f"{side_prefix}_ml_close"] = parse_float(row[11])
-
-                if side_prefix == "away":
-                    # Visitor row: open/close are spread numbers
-                    entry["away_spread_open"] = parse_float(row[9])
-                    entry["away_spread"] = parse_float(row[10])
-                    entry["away_spread_price"] = -110.0
-                    entry["total_open"] = None
-                    entry["total_close"] = None
-                    entry["total_open_price"] = None
-                    entry["total_close_price"] = None
-                else:
-                    # Home row: open/close are totals
-                    entry["total_open"] = parse_float(row[9])
-                    entry["total_close"] = parse_float(row[10])
-                    entry["total_open_price"] = None
-                    entry["total_close_price"] = None
-                    entry["home_spread"] = None
-                    entry["home_spread_price"] = None
-                    entry["away_spread_open"] = entry.get("away_spread_open")
-                    entry["away_spread"] = entry.get("away_spread")
-                    entry["away_spread_price"] = entry.get("away_spread_price")
+                # Store raw columns; decide spread vs total after both rows processed
+                entry[f"{side_prefix}_col9"] = parse_float(row[9])
+                entry[f"{side_prefix}_col10"] = parse_float(row[10])
             else:
                 raise ValueError(f"Unexpected row length {len(row)} in {row}")
 
-    # Calculate home spread as inverse of away spread when available
+    # Determine spread vs total based on favorite (lower ML)
     for _, data in games.items():
-        if data.get("away_spread") is not None:
-            data["home_spread"] = -data["away_spread"]
-            data["home_spread_price"] = -110.0
+        home_ml = data.get("home_ml_close")
+        away_ml = data.get("away_ml_close")
+        away_col9 = data.get("away_col9")
+        away_col10 = data.get("away_col10")
+        home_col9 = data.get("home_col9")
+        home_col10 = data.get("home_col10")
+
+        if home_ml is None or away_ml is None:
+            continue
+
+        if home_ml < away_ml:
+            # Home favorite: home row is spread, away row is total
+            data["home_spread"] = -home_col10 if home_col10 is not None else None
+            data["home_spread_open"] = -home_col9 if home_col9 is not None else None
+            data["away_spread"] = home_col10
+            data["away_spread_open"] = home_col9
+            data["total_open"] = away_col9
+            data["total_close"] = away_col10
+        else:
+            # Away favorite: away row is spread, home row is total
+            data["away_spread"] = -away_col10 if away_col10 is not None else None
+            data["away_spread_open"] = -away_col9 if away_col9 is not None else None
+            data["home_spread"] = away_col10
+            data["home_spread_open"] = away_col9
+            data["total_open"] = home_col9
+            data["total_close"] = home_col10
+
+        data["home_spread_price"] = -110.0
+        data["away_spread_price"] = -110.0
+        data["total_open_price"] = None
+        data["total_close_price"] = None
+
+        for k in ("home_col9", "home_col10", "away_col9", "away_col10"):
+            data.pop(k, None)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fieldnames = [
