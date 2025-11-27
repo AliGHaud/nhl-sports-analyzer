@@ -851,7 +851,7 @@ def lean_matchup(home_team, away_team, games, game_date=None, season=None):
 ---
 
 # PHASE 11: Spread Betting (After ML Model Complete)
-**Status:** ⬜ Not Started
+**Status:** 🚧 In Progress
 **Prerequisites:** Phases 1-10 complete with profitable ML model
 
 ## Why Add Spreads?
@@ -869,7 +869,7 @@ Adding spreads requires predicting **margin of victory**, not just who wins. Thi
 ---
 
 ## PHASE 11A: Spread Data Collection
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 ### Tasks
 
@@ -892,14 +892,14 @@ date,home_team,away_team,home_spread,away_spread,home_spread_odds,away_spread_od
 
 ### Completion Notes
 <!-- VS Helper: Add notes here -->
-- Date Completed:
-- Spread Data Source:
-- Issues:
+- Date Completed: 2025-11-27
+- Spread Data Source: SBR slim-format odds (parsed spreads via ML odds files)
+- Issues: Slim parsing corrected (favorite row holds spread, dog row holds total). Clean odds regenerated for 2017-18, 2018-19, 2019-20, 2021-22, 2022-23; 2023-24 still unavailable.
 
 ---
 
 ## PHASE 11B: Margin Prediction Model
-**Status:** ⬜ Not Started
+**Status:** 🚧 In Progress
 
 ### Concept
 Current model: **Win Probability** (e.g., 55% home wins)
@@ -908,18 +908,7 @@ New model: **Expected Margin** (e.g., home wins by 3.5 points)
 ### Approach Options
 
 #### Option 1: Points-Based Model (Simpler)
-Use existing signals to predict margin directly:
-
-```python
-def predict_margin(home_team, away_team, games, game_date=None, season=None):
-    \"\"\"Predict expected margin (home score - away score).\"\"\"
-    margin = 2.5  # base home field in points
-    # Point differential signal
-    # Rest advantage
-    # EPA advantage (if available)
-    # QB injury adjustment
-    return margin
-```
+Use existing signals to predict margin directly (implemented heuristic scaffold in `nfl_spread_model.py`: home field, point diff, rest, EPA/QB if available).
 
 #### Option 2: ML Regression (Advanced)
 - Features: point differential, EPA, rest, injuries/QB status, offense/defense splits
@@ -928,9 +917,9 @@ def predict_margin(home_team, away_team, games, game_date=None, season=None):
 
 ### Completion Notes
 <!-- VS Helper: Add notes here -->
-- Date Completed:
-- Approach Chosen:
-- Issues:
+- Date Completed: In progress (2025-11-27)
+- Approach Chosen: Heuristic points-based model scaffold in `nfl_spread_model.py` (home field, point diff, rest, EPA/QB if available)
+- Issues: Needs tuning/validation; std for cover probs currently 13.5; not yet backtested
 
 ---
 
