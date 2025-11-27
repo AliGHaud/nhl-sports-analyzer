@@ -146,6 +146,11 @@ def sanitize_team(name: str) -> str:
 
 
 def parse_float(value: str) -> Optional[float]:
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    if value == "pk" or value == "":
+        return 0.0
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -207,20 +212,39 @@ def ingest(raw_path: str, out_path: str, season_start_year: int) -> None:
                     entry["total_close"] = parse_float(row[14])
                     entry["total_close_price"] = parse_float(row[15])
             elif len(row) >= 13:
-                # Slim format (e.g., NFL files with ML only)
+                # Slim format (SBR NFL ML/spread/total collapsed)
                 entry[f"{side_prefix}_score"] = int(row[8]) if row[8] else None
                 entry[f"{side_prefix}_ml_open"] = None
                 entry[f"{side_prefix}_ml_close"] = parse_float(row[11])
-                entry[f"{side_prefix}_spread"] = None
-                entry[f"{side_prefix}_spread_price"] = None
 
                 if side_prefix == "away":
-                    entry["total_open"] = parse_float(row[9])
+                    # Visitor row: open/close are spread numbers
+                    entry["away_spread_open"] = parse_float(row[9])
+                    entry["away_spread"] = parse_float(row[10])
+                    entry["away_spread_price"] = -110.0
+                    entry["total_open"] = None
+                    entry["total_close"] = None
                     entry["total_open_price"] = None
-                    entry["total_close"] = parse_float(row[10])
                     entry["total_close_price"] = None
+                else:
+                    # Home row: open/close are totals
+                    entry["total_open"] = parse_float(row[9])
+                    entry["total_close"] = parse_float(row[10])
+                    entry["total_open_price"] = None
+                    entry["total_close_price"] = None
+                    entry["home_spread"] = None
+                    entry["home_spread_price"] = None
+                    entry["away_spread_open"] = entry.get("away_spread_open")
+                    entry["away_spread"] = entry.get("away_spread")
+                    entry["away_spread_price"] = entry.get("away_spread_price")
             else:
                 raise ValueError(f"Unexpected row length {len(row)} in {row}")
+
+    # Calculate home spread as inverse of away spread when available
+    for _, data in games.items():
+        if data.get("away_spread") is not None:
+            data["home_spread"] = -data["away_spread"]
+            data["home_spread_price"] = -110.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fieldnames = [
@@ -237,7 +261,9 @@ def ingest(raw_path: str, out_path: str, season_start_year: int) -> None:
         "away_ml_close",
         "home_spread",
         "home_spread_price",
+        "home_spread_open",
         "away_spread",
+        "away_spread_open",
         "away_spread_price",
         "total_open",
         "total_open_price",
