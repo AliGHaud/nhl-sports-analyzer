@@ -216,11 +216,14 @@ def process_game(
                 "side": bet_side,
                 "edge": edge_value,
                 "win": win_flag,
+                "won": win_flag,
+                "date": game_date,
                 "profit": profit,
                 "fav_key": fav_key,
                 "prob": prob_value,
                 "stake": stake,
                 "ev": ev_units,
+                "ev_units": ev_units,
                 "decimal_odds": decimal_odds,
             }
 
@@ -260,15 +263,35 @@ def bucket(prob, width=0.1):
     return f"{lo:.1f}-{hi:.1f}"
 
 
-def calculate_potd_results(all_bets_by_date: Dict[str, List[Dict]]) -> Dict[str, Any]:
-    """Select highest EV bet per day and summarize results."""
+def calculate_potd_results(
+    all_bets_by_date: Dict[str, List[Dict]],
+    potd_min_prob: float = 0.0,
+    potd_min_edge: float = 0.0,
+    potd_max_odds: float | None = None,
+) -> Dict[str, Any]:
+    """
+    Select highest EV bet per day with optional filtering and summarize results.
+    """
     potd_picks: List[Dict] = []
 
-    for game_date in sorted(all_bets_by_date.keys()):
-        day_bets = all_bets_by_date[game_date]
+    for game_date, day_bets in sorted(all_bets_by_date.items()):
         if not day_bets:
             continue
-        best_bet = max(day_bets, key=lambda x: x.get("ev", 0))
+
+        candidates = day_bets
+        if potd_min_prob > 0:
+            candidates = [b for b in candidates if b.get("prob", 0) >= potd_min_prob]
+        if potd_min_edge > 0:
+            candidates = [b for b in candidates if b.get("edge", 0) >= potd_min_edge]
+        if potd_max_odds is not None:
+            candidates = [
+                b for b in candidates if b.get("decimal_odds", 999) <= potd_max_odds
+            ]
+
+        if not candidates:
+            continue
+
+        best_bet = max(candidates, key=lambda x: x.get("ev_units", x.get("ev", 0)))
         best_bet = best_bet.copy()
         best_bet["date"] = game_date
         potd_picks.append(best_bet)
@@ -287,7 +310,7 @@ def calculate_potd_results(all_bets_by_date: Dict[str, List[Dict]]) -> Dict[str,
             "picks": [],
         }
 
-    wins = sum(1 for p in potd_picks if p.get("win"))
+    wins = sum(1 for p in potd_picks if p.get("won", p.get("win")))
     losses = len(potd_picks) - wins
     profit = sum(p.get("profit", 0.0) for p in potd_picks)
     roi = (profit / len(potd_picks)) * 100 if potd_picks else 0.0
@@ -304,7 +327,7 @@ def calculate_potd_results(all_bets_by_date: Dict[str, List[Dict]]) -> Dict[str,
     current_lose_streak = 0
 
     for pick in potd_picks:
-        if pick.get("win"):
+        if pick.get("won", pick.get("win")):
             current_win_streak += 1
             current_lose_streak = 0
             best_streak = max(best_streak, current_win_streak)
@@ -352,7 +375,7 @@ def backtest(
     processes: int = 1,
     quiet: bool = False,
 ) -> Dict[str, Any]:
-    games = load_games_from_espn_date_range(start_date, end_date, force_refresh=False)
+    games = load_games_from_espn_date_range(start_date, end_date)
     if not games:
         print("No games loaded for range", start_date, end_date)
         return {}
@@ -443,12 +466,15 @@ def backtest(
                         "away": res.get("away"),
                         "side": bet_info["side"],
                         "ev": bet_info.get("ev", 0.0),
+                        "ev_units": bet_info.get("ev_units", bet_info.get("ev", 0.0)),
                         "edge": bet_info["edge"],
                         "prob": bet_info["prob"],
                         "win": bet_info["win"],
+                        "won": bet_info["win"],
                         "profit": bet_info["profit"],
                         "fav_key": bet_info["fav_key"],
                         "decimal_odds": bet_info.get("decimal_odds", 0.0),
+                        "date": game_date,
                     }
                 )
 
@@ -607,10 +633,28 @@ def backtest(
                             f"hit={stats['hit_rate']*100:.1f}%"
                         )
 
-                potd_results = calculate_potd_results(all_bets_by_date)
+                potd_results = calculate_potd_results(
+                    all_bets_by_date,
+                    potd_min_prob=args.potd_min_prob,
+                    potd_min_edge=args.potd_min_edge,
+                    potd_max_odds=args.potd_max_odds,
+                )
                 if potd_results["total_days"]:
                     print("\n" + "=" * 50)
                     print("PICK OF THE DAY RESULTS (Highest EV per day)")
+                    if (
+                        args.potd_min_prob > 0
+                        or args.potd_min_edge > 0
+                        or args.potd_max_odds
+                    ):
+                        filters = []
+                        if args.potd_min_prob > 0:
+                            filters.append(f"min_prob={args.potd_min_prob:.0%}")
+                        if args.potd_min_edge > 0:
+                            filters.append(f"min_edge={args.potd_min_edge:.0%}")
+                        if args.potd_max_odds:
+                            filters.append(f"max_odds={args.potd_max_odds:.2f}")
+                        print(f"Filters: {', '.join(filters)}")
                     print("=" * 50)
                     print(
                         f"POTD Record: {potd_results['wins']}-{potd_results['losses']}"
@@ -712,6 +756,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--edge-sweep",
         help="Comma-separated list of edge thresholds to evaluate (e.g., 0.01,0.03,0.05).",
+    )
+    parser.add_argument(
+        "--potd-min-prob",
+        type=float,
+        default=0.0,
+        help="Minimum model probability for POTD selection (e.g., 0.60)",
+    )
+    parser.add_argument(
+        "--potd-min-edge",
+        type=float,
+        default=0.0,
+        help="Minimum edge for POTD selection (e.g., 0.20)",
+    )
+    parser.add_argument(
+        "--potd-max-odds",
+        type=float,
+        default=None,
+        help="Maximum decimal odds for POTD selection (e.g., 3.0 = +200)",
     )
     args = parser.parse_args()
     if args.edge_sweep:
