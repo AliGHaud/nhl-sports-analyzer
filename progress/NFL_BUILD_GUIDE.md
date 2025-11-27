@@ -703,162 +703,72 @@ def lean_matchup(home_team, away_team, games, game_date=None, season=None):
 ---
 
 # PHASE 5: Baseline Backtest
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 **⚠️ USER DOES THIS PHASE WITH CLAUDE CHAT ASSISTANT**
-
-## Pre-Requisites
-- [ ] Phase 1-4 complete
-- [ ] VS Helper confirms code is ready
-
-## What VS Helper Does
-- [ ] Confirm Phases 1-4 are complete
-- [ ] Provide user with backtest commands
-- [ ] Document any code issues found during testing
-
-## Backtest Commands for User
-
-### 2023 Season:
-```powershell
-$env:PYTHONPATH = "."
-$env:AUTO_SNAPSHOT_ENABLED = "false"
-python scripts/backtest_nfl.py `
-  --start 2023-09-07 `
-  --end 2024-01-07 `
-  --odds data/odds/clean/nfl/nfl_odds_2023.csv `
-  --min-edge 0.05 `
-  --min-edge-dog 0.22 `
-  --min-prob 0.50 `
-  --stake 1 `
-  --processes 1
-```
-
-### 2022 Season:
-```powershell
-$env:PYTHONPATH = "."
-$env:AUTO_SNAPSHOT_ENABLED = "false"
-python scripts/backtest_nfl.py `
-  --start 2022-09-08 `
-  --end 2023-01-08 `
-  --odds data/odds/clean/nfl/nfl_odds_2022.csv `
-  --min-edge 0.05 `
-  --min-edge-dog 0.22 `
-  --min-prob 0.50 `
-  --stake 1 `
-  --processes 1
-```
-
-### 2021 Season:
-```powershell
-$env:PYTHONPATH = "."
-$env:AUTO_SNAPSHOT_ENABLED = "false"
-python scripts/backtest_nfl.py `
-  --start 2021-09-09 `
-  --end 2022-01-09 `
-  --odds data/odds/clean/nfl/nfl_odds_2021.csv `
-  --min-edge 0.05 `
-  --min-edge-dog 0.22 `
-  --min-prob 0.50 `
-  --stake 1 `
-  --processes 1
-```
-
-## Expected Baseline Results
-- ROI: Likely negative or near breakeven initially
-- This establishes baseline before tuning
 
 ## Completion Notes
 <!-- VS Helper: Add notes here after user completes Phase 5 -->
-- Date Completed:
-- Baseline Results Summary:
-- Issues Found:
+- Date Completed: 2025-11-26
+- Baseline tested all 4 seasons with NHL default settings (temp 1.5, 5% fav, 22% dog, 0.50 prob)
+- Results: +22.05% ROI across 337 bets, +74.07u profit
+- Key finding: Underdogs massively outperformed favorites
 
 ---
 
 # PHASE 6: Temperature Tuning
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 **⚠️ USER DOES THIS PHASE WITH CLAUDE CHAT ASSISTANT**
-
-## Process (Same as NHL)
-
-1. Start with temp = 1.5 (NHL default)
-2. Test temps: 1.0, 1.25, 1.5, 1.75, 2.0
-3. Find temp with best ROI
-4. Lock in optimal temperature
-
-## What VS Helper Does
-- [ ] Update DEFAULT_NFL_TEMPERATURE in nfl_analyzer.py when optimal found
-- [ ] Document final temperature value
 
 ## Completion Notes
 <!-- VS Helper: Add notes here after user completes Phase 6 -->
-- Date Completed:
-- Temperatures Tested:
-- Optimal Temperature:
-- ROI at Optimal:
+- Date Completed: 2025-11-26
+- Temperatures Tested: 1.5, 1.75
+- Optimal Temperature: 1.5 (same as NHL)
+- Notes: 1.75 had slightly better calibration but less volume/profit
 
 ---
 
 # PHASE 7: Edge Threshold Tuning
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 **⚠️ USER DOES THIS PHASE WITH CLAUDE CHAT ASSISTANT**
-
-## Process (Same as NHL)
-
-1. Start with NHL defaults (5% fav, 22% dog)
-2. Analyze favorite vs underdog ROI
-3. If underdogs losing: increase min-edge-dog
-4. Test: 0.15, 0.18, 0.22, 0.25, 0.30
-5. Find optimal underdog threshold
-6. Optionally tune min-prob (0.50, 0.55, 0.60, 0.65, 0.70)
-
-## What VS Helper Does
-- [ ] Update MIN_EDGE_UNDERDOG in nfl_analyzer.py when optimal found
-- [ ] Update MIN_EDGE_FAVORITE if changed
-- [ ] Update MIN_MODEL_PROBABILITY if changed
-- [ ] Document final values
 
 ## Completion Notes
 <!-- VS Helper: Add notes here after user completes Phase 7 -->
-- Date Completed:
-- Final MIN_EDGE_FAVORITE:
-- Final MIN_EDGE_UNDERDOG:
-- Final MIN_MODEL_PROBABILITY:
-- Final ROI:
+- Date Completed: 2025-11-26
+- Final MIN_EDGE_FAVORITE: 0.30 (effectively dogs only - favorites consistently lost money)
+- Final MIN_EDGE_UNDERDOG: 0.15 (tested 12%, 15%, 18%, 22% - 15% best profit)
+- Final MIN_MODEL_PROBABILITY: 0.55 (tested 0.50, 0.55, 0.60 - 0.55 best balance)
+- Final POTD_MIN_PROB: 0.60 (only filter needed - gave 0 losing seasons)
+- Key insight: NFL = underdogs only strategy
 
 ---
 
 # PHASE 8: Multi-Season Validation
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 **⚠️ USER DOES THIS PHASE WITH CLAUDE CHAT ASSISTANT**
-
-## Process
-
-1. Run final settings on ALL seasons (2021, 2022, 2023)
-2. Verify profitability across all seasons
-3. Calculate combined stats
-4. Verify POTD results
-
-## Target Results
-
-| Metric | Target |
-|--------|--------|
-| Overall ROI | +5% or better |
-| POTD ROI | +10% or better |
-| Profitable Seasons | All tested seasons |
-
-## What VS Helper Does
-- [ ] Document final results for all seasons
-- [ ] Confirm settings are locked in code
 
 ## Completion Notes
 <!-- VS Helper: Add notes here after user completes Phase 8 -->
-- Date Completed:
-- 2021 Season ROI:
-- 2022 Season ROI:
-- 2023 Season ROI:
-- Combined ROI:
-- POTD Record:
-- POTD ROI:
+- Date Completed: 2025-11-26
+- Final Settings:
+  - Temperature: 1.5
+  - Min Prob: 0.55
+  - Min Edge (Fav): 0.30 (dogs only)
+  - Min Edge (Dog): 0.15
+  - POTD Min Prob: 0.60
+- All Bets Results (15% dog edge, 0.55 prob):
+  - 2017-18: +13.28% ROI, +6.24u, 47 bets
+  - 2018-19: +41.29% ROI, +12.80u, 31 bets
+  - 2019-20: +48.48% ROI, +26.18u, 54 bets
+  - 2021-22: +75.93% ROI, +28.85u, 38 bets
+  - Total: +43.57% ROI, +74.07u, 170 bets
+- POTD Results (with 60% min prob filter):
+  - 2017-18: 10-13, +4.83% ROI, +1.11u
+  - 2018-19: 9-7, +43.75% ROI, +7.00u
+  - 2019-20: 10-13, +33.26% ROI, +7.65u
+  - 2021-22: 14-7, +80.95% ROI, +17.00u
+  - Total: 43-40, +39.47% ROI, +32.76u
+- Key Achievement: 0 losing POTD seasons with 60% min prob filter
 
 ---
 
@@ -947,19 +857,21 @@ python scripts/backtest_nfl.py `
 
 | Parameter | Value | Phase Set |
 |-----------|-------|-----------|
-| Temperature | TBD | Phase 6 |
-| Min Probability | TBD | Phase 7 |
-| Min Edge (Favorite) | TBD | Phase 7 |
-| Min Edge (Underdog) | TBD | Phase 7 |
+| Temperature | 1.5 | Phase 6 |
+| Min Probability | 0.55 | Phase 7 |
+| Min Edge (Favorite) | 0.30 | Phase 7 |
+| Min Edge (Underdog) | 0.15 | Phase 7 |
+| POTD Min Prob | 0.60 | Phase 7 |
 
 ## Backtest Results
 
 | Season | ROI | Bets | POTD ROI |
 |--------|-----|------|----------|
-| 2021 | TBD | TBD | TBD |
-| 2022 | TBD | TBD | TBD |
-| 2023 | TBD | TBD | TBD |
-| **Total** | TBD | TBD | TBD |
+| 2017-18 | +13.28% | 47 | +4.83% |
+| 2018-19 | +41.29% | 31 | +43.75% |
+| 2019-20 | +48.48% | 54 | +33.26% |
+| 2021-22 | +75.93% | 38 | +80.95% |
+| **Total** | +43.57% | 170 | +39.47% |
 
 ## Files Modified
 
@@ -1002,4 +914,5 @@ NFL should aim for similar or better results.
 | Date | Phase | Change | By |
 |------|-------|--------|-----|
 | | | Initial guide created | Claude |
+| 2025-11-26 | 5-8 | Completed tuning: dogs-only strategy, 15% edge, 0.55 prob, 0.60 POTD filter | User |
 | | | Updated: Moved advanced stats (Phase 4) before backtesting | Claude |
