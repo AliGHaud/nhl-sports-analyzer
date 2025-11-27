@@ -850,6 +850,147 @@ def lean_matchup(home_team, away_team, games, game_date=None, season=None):
 
 ---
 
+# PHASE 11: Spread Betting (After ML Model Complete)
+**Status:** ⬜ Not Started
+**Prerequisites:** Phases 1-10 complete with profitable ML model
+
+## Why Add Spreads?
+
+| Factor | Moneyline | Spread |
+|--------|-----------|--------|
+| NFL Popularity | Less common | **Primary market** |
+| Juice | -150 to +150 typical | -110 both sides |
+| Edge Required | Higher | Lower (less juice) |
+| Prediction Type | Win/Lose | Margin of victory |
+
+## Overview
+Adding spreads requires predicting **margin of victory**, not just who wins. This is a separate model layer on top of the existing win probability model.
+
+---
+
+## PHASE 11A: Spread Data Collection
+**Status:** ⬜ Not Started
+
+### Tasks
+
+- [ ] Find historical spread data sources:
+
+| Source | Data | Notes |
+|--------|------|-------|
+| Kaggle | Historical spreads | Search "NFL spreads" |
+| AussportsBetting | Spread + totals | Same source as ML odds |
+| SBR | Point spreads | May have closing lines |
+| Pro-Football-Reference | Game scores | For actual margins |
+
+- [ ] Download spread data for 2021, 2022, 2023 seasons
+- [ ] Create `scripts/ingest_nfl_spreads.py`
+- [ ] Expected CSV format:
+```
+date,home_team,away_team,home_spread,away_spread,home_spread_odds,away_spread_odds
+2023-09-07,DET,KC,+6.5,-6.5,-110,-110
+```
+
+### Completion Notes
+<!-- VS Helper: Add notes here -->
+- Date Completed:
+- Spread Data Source:
+- Issues:
+
+---
+
+## PHASE 11B: Margin Prediction Model
+**Status:** ⬜ Not Started
+
+### Concept
+Current model: **Win Probability** (e.g., 55% home wins)
+New model: **Expected Margin** (e.g., home wins by 3.5 points)
+
+### Approach Options
+
+#### Option 1: Points-Based Model (Simpler)
+Use existing signals to predict margin directly:
+
+```python
+def predict_margin(home_team, away_team, games, game_date=None, season=None):
+    \"\"\"Predict expected margin (home score - away score).\"\"\"
+    margin = 2.5  # base home field in points
+    # Point differential signal
+    # Rest advantage
+    # EPA advantage (if available)
+    # QB injury adjustment
+    return margin
+```
+
+#### Option 2: ML Regression (Advanced)
+- Features: point differential, EPA, rest, injuries/QB status, offense/defense splits
+- Target: actual margin (home_score - away_score)
+- Model: lightgbm/sklearn regression
+
+### Completion Notes
+<!-- VS Helper: Add notes here -->
+- Date Completed:
+- Approach Chosen:
+- Issues:
+
+---
+
+## PHASE 11C: Spread Edge Calculation
+**Status:** ⬜ Not Started
+
+### Tasks
+- [ ] Convert predicted margin to cover probabilities (Normal approximation)
+- [ ] Compute spread edge vs market spread/juice
+- [ ] Add threshold configs (e.g., min cover prob, min edge)
+
+### Completion Notes
+- Date Completed:
+- Edge Formula Used:
+- Issues:
+
+---
+
+## PHASE 11D: Spread Backtest Script
+**Status:** ⬜ Not Started
+
+### Tasks
+- [ ] Create `scripts/backtest_nfl_spread.py` based on ML backtest structure
+- [ ] Inputs: spread CSV, model spread probs, edge thresholds
+- [ ] Outputs: ROI, calibration, POTD vs spread
+
+### Completion Notes
+- Date Completed:
+- Issues:
+
+---
+
+## PHASE 11E: Spread Tuning
+**Status:** ⬜ Not Started
+
+### Tasks
+- [ ] Tune cover prob threshold (e.g., 0.55, 0.57, 0.60)
+- [ ] Tune edge threshold (e.g., 2%, 3%, 5%)
+- [ ] Tune max spread (optional cap on large spreads)
+
+### Completion Notes
+- Date Completed:
+- Issues:
+
+---
+
+## PHASE 11F: API Integration (Spreads)
+**Status:** ⬜ Not Started
+
+### Tasks
+- [ ] Add spread outputs to NFL endpoints
+- [ ] Add spread POTD endpoint or extend existing POTD
+- [ ] Ensure live odds ingestion supports spread lines
+
+### Completion Notes
+- Date Completed:
+- Issues:
+
+---
+
 # Final Settings Summary
 **Updated by VS Helper after each phase**
 

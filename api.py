@@ -57,6 +57,7 @@ from nhl_analyzer import (
     implied_prob_american,
     profit_on_win_for_1_unit,
     model_probs_from_scores,
+    american_to_decimal,
     confidence_grade,
     DEFAULT_NHL_TEMPERATURE,
     MIN_MODEL_PROBABILITY,
@@ -1303,7 +1304,7 @@ def nfl_pick(
             "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
         }
 
-    schedule = load_schedule_nfl(end_str, force_refresh=force_refresh)
+    schedule = load_schedule_nfl(end_str)
     if not schedule:
         return {
             "date": end_str,

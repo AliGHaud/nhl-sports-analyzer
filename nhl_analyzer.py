@@ -439,6 +439,14 @@ def profit_on_win_for_1_unit(odds):
         return odds / 100.0
 
 
+def american_to_decimal(odds):
+    """Convert American odds to decimal odds."""
+    odds = float(odds)
+    if odds < 0:
+        return 1 + (100 / abs(odds))
+    return 1 + (odds / 100)
+
+
 def model_probs_from_scores(home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE):
     """
     Convert home/away scores into probabilities via softmax with optional temperature.
