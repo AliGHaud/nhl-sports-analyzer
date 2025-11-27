@@ -66,6 +66,11 @@ from nhl_analyzer import (
 from nfl_analyzer import (
     lean_matchup as nfl_lean_matchup,
     calculate_stats as nfl_calculate_stats,
+    DEFAULT_NFL_TEMPERATURE,
+    MIN_MODEL_PROBABILITY as NFL_MIN_MODEL_PROBABILITY,
+    MIN_EDGE_FAVORITE as NFL_MIN_EDGE_FAVORITE,
+    MIN_EDGE_UNDERDOG as NFL_MIN_EDGE_UNDERDOG,
+    POTD_MIN_PROB as NFL_POTD_MIN_PROB,
 )
 from nfl_data_sources import (
     load_games_from_espn_date_range as load_games_nfl_range,
@@ -1188,11 +1193,16 @@ def nfl_matchup(
     games = load_games_nfl_range(start_str, end_str)
     if not games:
         raise HTTPException(status_code=400, detail="No games in range")
-    home_score, away_score, reasons = nfl_lean_matchup(home.upper(), away.upper(), games)
+    # Derive season/year for advanced stats (season tied to start year)
+    season_year = end_dt.year if end_dt.month >= 9 else end_dt.year - 1
+    game_date = end_str  # use end of range as reference date for rest/season context
+    home_score, away_score, reasons = nfl_lean_matchup(
+        home.upper(), away.upper(), games, game_date=game_date, season=season_year
+    )
     if home_score is None:
         raise HTTPException(status_code=400, detail="Not enough data")
     model_home_prob, model_away_prob = model_probs_from_scores(
-        home_score, away_score, temperature=DEFAULT_NHL_TEMPERATURE
+        home_score, away_score, temperature=DEFAULT_NFL_TEMPERATURE
     )
     ev = None
     odds = load_odds_nfl(home.upper(), away.upper())
@@ -1211,12 +1221,27 @@ def nfl_matchup(
             "market_prob": {"home": p_home_market, "away": p_away_market},
             "edge_pct": {"home": home_edge, "away": away_edge},
             "ev_units": {"home": home_ev, "away": away_ev},
-            "grades": {"home": confidence_grade(home_edge, home_ev), "away": confidence_grade(away_edge, away_ev)},
+            "grades": {
+                "home": confidence_grade(home_edge, home_ev),
+                "away": confidence_grade(away_edge, away_ev),
+            },
         }
     diff = home_score - away_score
     side_lean = reasons.get("lean") or "No clear edge"
     return {
-        "params": {"home": home.upper(), "away": away.upper(), "start_date": start_str, "end_date": end_str},
+        "params": {
+            "home": home.upper(),
+            "away": away.upper(),
+            "start_date": start_str,
+            "end_date": end_str,
+            "defaults": {
+                "min_prob": NFL_MIN_MODEL_PROBABILITY,
+                "min_edge_favorite": NFL_MIN_EDGE_FAVORITE,
+                "min_edge_underdog": NFL_MIN_EDGE_UNDERDOG,
+                "potd_min_prob": NFL_POTD_MIN_PROB,
+                "temperature": DEFAULT_NFL_TEMPERATURE,
+            },
+        },
         "side": {"home_score": home_score, "away_score": away_score, "lean": side_lean, "reasons": reasons},
         "model_prob": {"home": model_home_prob, "away": model_away_prob},
         "ev": ev,
@@ -1225,8 +1250,164 @@ def nfl_matchup(
 
 
 @app.get("/nfl/pick")
-def nfl_pick():
-    raise HTTPException(status_code=501, detail="NFL pick not implemented yet.")
+def nfl_pick(
+    force_refresh: bool = Query(
+        False,
+        description="If true, bypass cached ESPN responses for this request.",
+    ),
+    ignore_pick_gate: bool = Query(
+        False,
+        description="If true, skip the noon gating (testing/internal).",
+    ),
+    user: Optional[dict] = Depends(current_user_optional),
+):
+    """Pick of the day for NFL using tuned thresholds."""
+    if FIREBASE_ENFORCE_AUTH and not user:
+        raise HTTPException(status_code=401, detail="Auth required")
+    if FIREBASE_REQUIRE_PRO_FOR_PICK and not _is_pro(user):
+        raise HTTPException(status_code=403, detail="Pro tier required")
+
+    now = _now_in_zone()
+    today = now.date()
+    pick_gate = time(PICK_GATE_HOUR, PICK_GATE_MINUTE)
+
+    if not ignore_pick_gate and now.time() < pick_gate:
+        return {
+            "date": today.isoformat(),
+            "timezone": APP_TIMEZONE,
+            "pick": None,
+            "reason": f"Pick available after {pick_gate.strftime('%I:%M %p')} {APP_TIMEZONE}.",
+            "candidates": [],
+            "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
+        }
+
+    # Use last ~120 days for profiles
+    start_dt = today - timedelta(days=120)
+    start_str = start_dt.isoformat()
+    end_str = today.isoformat()
+    season_year = today.year if today.month >= 9 else today.year - 1
+
+    try:
+        games = load_games_nfl_range(start_str, end_str)
+    except Exception as e:
+        logger.exception("NFL pick data fetch failed %s-%s | %s", start_str, end_str, e)
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {e}")
+
+    if not games:
+        return {
+            "date": end_str,
+            "timezone": APP_TIMEZONE,
+            "pick": None,
+            "reason": "No historical games available to build profiles.",
+            "candidates": [],
+            "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
+        }
+
+    schedule = load_schedule_nfl(end_str, force_refresh=force_refresh)
+    if not schedule:
+        return {
+            "date": end_str,
+            "timezone": APP_TIMEZONE,
+            "pick": None,
+            "reason": "No games scheduled today.",
+            "candidates": [],
+            "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
+        }
+
+    candidates = []
+    for g in schedule:
+        home = g["home_team"]
+        away = g["away_team"]
+        try:
+            home_score, away_score, reasons = nfl_lean_matchup(
+                home, away, games, game_date=end_str, season=season_year
+            )
+        except Exception:
+            continue
+
+        odds = load_odds_nfl(home, away)
+        if not odds or odds.get("home_ml") is None or odds.get("away_ml") is None:
+            continue
+
+        p_home_model, p_away_model = model_probs_from_scores(
+            home_score, away_score, temperature=DEFAULT_NFL_TEMPERATURE
+        )
+        p_home_market = implied_prob_american(odds["home_ml"])
+        p_away_market = implied_prob_american(odds["away_ml"])
+        home_profit = profit_on_win_for_1_unit(odds["home_ml"])
+        away_profit = profit_on_win_for_1_unit(odds["away_ml"])
+        home_ev = p_home_model * home_profit - (1 - p_home_model)
+        away_ev = p_away_model * away_profit - (1 - p_away_model)
+        home_edge = p_home_model - p_home_market
+        away_edge = p_away_model - p_away_market
+
+        implied_home_fav = p_home_market >= p_away_market
+        implied_away_fav = p_away_market >= p_home_market
+        home_edge_required = NFL_MIN_EDGE_FAVORITE if implied_home_fav else NFL_MIN_EDGE_UNDERDOG
+        away_edge_required = NFL_MIN_EDGE_FAVORITE if implied_away_fav else NFL_MIN_EDGE_UNDERDOG
+
+        # Evaluate sides
+        for side_key in ("home", "away"):
+            model_prob = p_home_model if side_key == "home" else p_away_model
+            edge = home_edge if side_key == "home" else away_edge
+            ev_units = home_ev if side_key == "home" else away_ev
+            odds_val = odds["home_ml"] if side_key == "home" else odds["away_ml"]
+            market_prob = p_home_market if side_key == "home" else p_away_market
+            edge_req = home_edge_required if side_key == "home" else away_edge_required
+
+            if model_prob < NFL_MIN_MODEL_PROBABILITY:
+                continue
+            if edge < edge_req:
+                continue
+
+            decimal_odds = american_to_decimal(odds_val)
+            candidates.append(
+                {
+                    "side": side_key,
+                    "team": home if side_key == "home" else away,
+                    "ev_units": ev_units,
+                    "edge_pct": edge * 100.0,
+                    "prob": model_prob,
+                    "market_prob": market_prob,
+                    "odds": odds_val,
+                    "decimal_odds": decimal_odds,
+                    "grades": confidence_grade(edge * 100.0, ev_units),
+                    "reasons": reasons,
+                }
+            )
+
+    if not candidates:
+        return {
+            "date": end_str,
+            "timezone": APP_TIMEZONE,
+            "pick": None,
+            "reason": "No qualifying pick met the thresholds.",
+            "candidates": [],
+            "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
+            "defaults": {
+                "min_prob": NFL_MIN_MODEL_PROBABILITY,
+                "min_edge_favorite": NFL_MIN_EDGE_FAVORITE,
+                "min_edge_underdog": NFL_MIN_EDGE_UNDERDOG,
+                "potd_min_prob": NFL_POTD_MIN_PROB,
+                "temperature": DEFAULT_NFL_TEMPERATURE,
+            },
+        }
+
+    best = max(candidates, key=lambda c: c["ev_units"])
+    return {
+        "date": end_str,
+        "timezone": APP_TIMEZONE,
+        "pick": best,
+        "candidates": candidates,
+        "params": {"force_refresh": force_refresh, "ignore_pick_gate": ignore_pick_gate},
+        "defaults": {
+            "min_prob": NFL_MIN_MODEL_PROBABILITY,
+            "min_edge_favorite": NFL_MIN_EDGE_FAVORITE,
+            "min_edge_underdog": NFL_MIN_EDGE_UNDERDOG,
+            "potd_min_prob": NFL_POTD_MIN_PROB,
+            "temperature": DEFAULT_NFL_TEMPERATURE,
+        },
+    }
 
 
 @app.get("/nhl/today")
