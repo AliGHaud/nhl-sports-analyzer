@@ -19,7 +19,9 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Goalie heuristic: ESPN roster/stats to pick a probable starter by starts/sv%, apply small lean nudge when sv% gap is >= ~1%, with reasons.
 - UI: goalie impact card on main and modal views shows ratings/start prob/rest penalty/score contrib without raw JSON.
 - Startup cache cleanup: projected goalie caches and all matchup snapshots are cleared on startup to avoid stale projections after redeploys.
-- Lean tuning: softened weights (home/xG/rest/GA/ST), temperature-scaled probabilities (0.75), and reduced goalie impact to improve calibration; CLI lean aligned with API (xG/rest/goalie/temperature).
+- Lean tuning: softened weights (home/xG/rest/GA/ST), temperature-scaled probabilities (now 1.5), and reduced goalie impact to improve calibration; CLI lean aligned with API (xG/rest/goalie/temperature).
+- Backtest overhaul: odds validation, progress bars, result persistence, EV buckets, edge sweep support, multiprocessing/caching, single-bet logic, fav/dog thresholds, and POTD tracking that picks the highest-EV bet per day.
+- Clean odds library: scripted ingestion for SBR seasons (2017-20, 2021-23) now produces normalized CSVs under `data/odds/clean` for historical testing.
 - Pick filters/tests: tightened pick filters (model prob floor, edge/EV thresholds, odds cap, goalie certainty, slate-based thresholds) and added pytest coverage for lean/probability softening and pick filters.
 - Auth scaffolding: added Firebase frontend wiring (Google login, ID token attachment to API calls), Firebase admin init, and `/auth/me` status endpoint; env/config placeholders ready for enforcement/gating.
 - Optional auth gating: `/nhl/pick` enforces auth/pro tier when env flags are set; matchup/team/today accept auth dependency for future gating.
@@ -31,6 +33,7 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Injuries/Goalies: Rotowire JSON injury feed with TTL cache; `/nhl/injuries` endpoint; matchup responses include injuries (per team) + source/timestamp; UI card shows only key injuries. Injury entries include `important` flag (skater gp>=5 & toi>12; goalie gp/starts>=5 with sv%>=0.895 if present) derived from MoneyPuck player stats; injuries adjust lean scores (goalie -0.6, key skaters -0.25 each, depth -0.1; capped) with reasons and are included in snapshots. Projected goalies fetched daily from Rotowire and threaded into matchups/snapshots; UI shows projected starter + status.
 - Tests: FastAPI TestClient coverage for matchup (with/without odds), bad date, unknown team, team endpoint, today endpoint with odds, sports endpoint.
 - Docs: README with setup, endpoints, deploy notes, and ESPN/caching info.
+- NFL spread v2: Added Elo module (`nfl_spread_v2/nfl_elo.py` with situational adjustments), logistic cover model (`nfl_spread_v2/nfl_cover_model.py`), walk-forward backtest (`scripts/backtest_nfl_spread_v2.py`), live picks generator (`nfl_spread_v2/nfl_spread_picks.py`) with caching, API endpoint `/nfl/spread-picks`, and CLI `scripts/nfl_spread_picks_today.py`. Odds/team normalization updated (WAS→WSH; Washington aliases).
 
 ## Decisions
 - Scope now: NHL only; keep ESPN data for games/odds short term.
@@ -54,23 +57,19 @@ Build a production-ready web app that analyzes NHL (first), using real stats/odd
 - Persistence: manual overrides persist across redeploys when data/cache is mounted on a Render volume; otherwise overrides are ephemeral.
 
 ## Next Actions
-1) Monitor/tune new lean weights and de-duplication: watch outputs and adjust recency/home/GA/xG/goalie/special-teams balances if needed.
-2) Pick-of-day tuning: monitor 45-day window impact and adjust EV/edge/model thresholds or recency weighting if needed.
-3) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
-4) Odds reliability: research odds APIs (e.g., TheOddsAPI, OddsAPI, paid feeds) and plan the integration point.
-5) Goalie metric upgrade: add GSAx/long-run SV% and starter/backup identification; weight goalie gap toward ~20–25% influence.
-6) Defense metric upgrade: replace GA-based nudge with xGA/shot suppression when available; keep weight modest to avoid goalie double-counting.
-7) Special teams refinement: use season-long ST goal differential or PPxG-PKxG (when available) as the small ST factor; keep weight low.
-8) Injury/lineup adjustments: incorporate key player/goalie absences via simple ratings or flags to adjust lean scores.
-9) Trends data: extend profiles to include rest/back-to-back flags and recent pace (skate to future multi-sport). Integrate free advanced stats (MoneyPuck) for xG/HDCF/GSAx/PP/PK; cache locally and merge into profiles with tiered weights (modest to avoid double counting). Defer injuries/line-history until a paid/reliable feed is chosen.
-10) Persistence/logs: add request/response logging and a lightweight store for recent outputs (or file/DB when storage is enabled).
-11) Auth/monetization: add user accounts (Firebase or similar), free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
-12) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
-13) Deploy: move to paid Render to avoid autosleep once ready.
-14) Optional/context signals: monitor PDO/regression flags, schedule strength, penalty differential, finishing talent vs xG, and deserve-to-win deltas as qualitative overlays or small tweaks (avoid overweighting vs core signals).
-15) Docs: keep README in sync (new endpoints/timezone/pick gate/lookback/recency weighting/home bonus/rest weighting/defense process/HDF stance/special teams/goalie weighting/de-duplication/context signals/admin console/overrides) and add UI usage notes.
-16) Hook player stats into injury importance: pass skater/goalie stats into injury loader so `important` flags reflect real usage; highlight in UI.
-17) Scheduled snapshots only: ensure only the noon job/admin endpoint creates matchup snapshots; pre-noon analyses always fresh, post-noon always from the common snapshot time.
+1) Monitor/tune NHL lean weights and pick filters as needed; keep README in sync.
+2) UI polish for mobile: tighten layout, larger tap targets, quick filters, loading/error states; keep raw JSON hidden by default.
+3) Odds reliability: research odds APIs (e.g., TheOddsAPI/OddsAPI/paid feeds) and plan integration; live NFL spreads currently rely on ESPN scoreboard.
+4) Goalie metric upgrade: add GSAx/long-run SV% and starter/backup identification; weight goalie gap toward ~20–25% influence.
+5) Defense metric upgrade: replace GA-based nudge with xGA/shot suppression when available; keep weight modest to avoid goalie double-counting.
+6) Special teams refinement: use season-long ST goal differential or PPxG-PKxG (when available) as the small ST factor; keep weight low.
+7) Injury/lineup adjustments: incorporate key player/goalie absences via simple ratings or flags to adjust lean scores.
+8) Trends/data: extend profiles to include rest/back-to-back flags and recent pace; integrate richer stats when sourced. Defer injuries/line-history until a paid/reliable feed is chosen.
+9) Persistence/logs: add request/response logging and lightweight store for recent outputs (or file/DB when storage is enabled).
+10) Auth/monetization: add user accounts (Firebase or similar), free vs. paid tier feature flags, and (later) ad placements vs. Stripe/Paddle for payments.
+11) Security hardening: add rate limiting, stricter input validation, error handling, and WAF/CDN once on paid hosting.
+12) Deploy: move to paid Render to avoid autosleep once ready.
+13) NFL spread v2 next steps: add 2023+ odds if available, consider calibrated probabilities when validated, evaluate additional features (travel/QB), and monitor caching freshness/performance for live picks.
 
 ## Advanced stats roadmap (tiered weighting)
 - Tier 1 (heavy impact): starter/goalie quality (xSV%/GSAx), xG/HDCF differential, PP vs PK mismatch, rest/travel (B2B/3-in-4/time zones), rush xGA, key injuries.

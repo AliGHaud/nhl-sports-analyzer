@@ -1,0 +1,15 @@
+﻿.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+data/cache/
+data/odds/raw/
+nfl_backtest_results_*.json
+nfl_spread_v2/
+tests/__pycache__/
+scripts/__pycache__/
+.env
+*.log
+frontend/node_modules/
+frontend/dist/

@@ -31,7 +31,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi import Header, Depends
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import requests
 
 from data_sources import (
     CACHE_DIR,
@@ -79,11 +81,27 @@ from nfl_data_sources import (
     load_current_odds_for_matchup as load_odds_nfl,
     load_games_from_espn_scoreboard as load_games_nfl_today,
 )
+from nfl_spread_v2.nfl_spread_picks import get_nfl_spread_picks
 
 app = FastAPI(title="NHL Betting Analyzer API", version="0.1.0")
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# CORS: allow local dev origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1102,9 +1120,17 @@ def _pick_candidate_from_ev(home, away, ev, reasons, slate_size: int = 1):
 
 
 @app.get("/auth/me")
-def auth_me():
-    """Return basic app status (auth not enforced yet)."""
-    return {"auth_configured": bool(FIREBASE_CREDENTIALS_PATH)}
+async def auth_me(user: dict = Depends(current_user_optional)):
+    """Return current user info and tier."""
+    if not user:
+        return {"authenticated": False, "tier": "free"}
+
+    return {
+        "authenticated": True,
+        "uid": user.get("uid"),
+        "email": user.get("email"),
+        "tier": "pro" if _is_pro(user) else "free",
+    }
 
 
 @app.middleware("http")
@@ -1247,6 +1273,19 @@ def nfl_matchup(
         "model_prob": {"home": model_home_prob, "away": model_away_prob},
         "ev": ev,
         "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/nfl/spread-picks")
+async def nfl_spread_picks(min_prob: float = 0.55):
+    """Get today's NFL spread picks from v2 model."""
+    today = _now_in_zone().date().isoformat()
+    picks = get_nfl_spread_picks(min_prob=min_prob)
+    return {
+        "date": today,
+        "min_prob": min_prob,
+        "picks": picks,
+        "potd": picks[0] if picks else None,
     }
 
 
@@ -1445,13 +1484,13 @@ def nhl_today(force_refresh: bool = Query(False), user: Optional[dict] = Depends
     }
 
 
-@app.get("/", include_in_schema=False)
-def root():
-    """Serve the quick test UI."""
-    index_path = STATIC_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return {"message": "UI not found. Ensure static/index.html exists."}
+#@app.get("/", include_in_schema=False)
+#def root():
+#    """Serve the quick test UI."""
+#    index_path = STATIC_DIR / "index.html"
+#    if index_path.exists():
+#        return FileResponse(index_path)
+#    return {"message": "UI not found. Ensure static/index.html exists."}
 
 
 @app.get("/admin", include_in_schema=False)
@@ -2018,3 +2057,52 @@ def nhl_injuries(force_refresh: bool = Query(False, description="Refresh cached 
     if not injuries:
         raise HTTPException(status_code=502, detail="Injury feed unavailable.")
     return injuries
+
+
+@app.get("/nhl/picks")
+def nhl_picks():
+    """
+    Return list of NHL picks (currently wraps POTD if available).
+    """
+    try:
+        r = requests.get("http://127.0.0.1:8000/nhl/pick", params={"ignore_pick_gate": True}, timeout=5)
+        if r.ok:
+            data = r.json()
+            pick = data.get("pick") if isinstance(data, dict) else None
+            return {"picks": [pick] if pick else []}
+    except Exception:
+        pass
+    return {"picks": []}
+
+
+@app.get("/nfl/picks")
+def nfl_picks():
+    """
+    Return list of NFL picks (currently wraps POTD if available).
+    """
+    try:
+        r = requests.get("http://127.0.0.1:8000/nfl/pick", params={"ignore_pick_gate": True}, timeout=5)
+        if r.ok:
+            data = r.json()
+            pick = data.get("pick") if isinstance(data, dict) else None
+            return {"picks": [pick] if pick else []}
+    except Exception:
+        pass
+    return {"picks": []}
+
+
+# Serve React frontend build (must be last, after all API routes)
+frontend_build_path = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+# Mount assets FIRST (before catch-all route)
+assets_path = os.path.join(frontend_build_path, "assets")
+app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+# Catch-all route for SPA
+@app.get("/")
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str = ""):
+    index_path = os.path.join(frontend_build_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"error": "Frontend not built"}

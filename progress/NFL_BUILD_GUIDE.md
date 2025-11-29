@@ -56,6 +56,7 @@ Replicate NHL success for NFL using the same architecture and process.
 | 8 | Multi-Season Validation | User + Claude |
 | 9 | API Integration | VS Helper |
 | 10 | Real-World Testing (Paper Trading) | User + Claude |
+| 11 | **NFL Spread v2 (Elo + Logistic)** | VS Helper |
 
 ---
 
@@ -392,6 +393,36 @@ date,home_team,away_team,home_ml_close,away_ml_close
 - Issues Encountered: Added mappings for KCChiefs/LVRaiders/Tampa/Washingtom typos. Pending 2023-24 raw odds if located later.
 
 ---
+
+# PHASE 11: NFL Spread v2 (Elo + Logistic)  **NEW**
+**Status:** ✅ In-progress milestones completed (core model, backtest, picks)
+
+## Phase 11.1 Elo Foundation
+- [x] Added `nfl_spread_v2/nfl_elo.py` with Elo (K=20, HFA=48, 1/3 season regression)
+- [x] Included situational adjustments (bye +25, short rest -5, travel -4/1000mi, DEN altitude -10)
+- [x] Elo→spread helper, season boundary handling
+
+## Phase 11.2 Cover Model
+- [x] Added `nfl_spread_v2/nfl_cover_model.py` (logistic regression, features: Elo spread, market spread, disagreement, home dog flag, rest diff)
+- [x] Calibration via `CalibratedClassifierCV` supported (not used for live picks per instructions)
+
+## Phase 11.3 Backtest (Spread v2)
+- [x] Created `scripts/backtest_nfl_spread_v2.py` walk-forward harness (train 2017-19 → test 2020; train 2017-20 → test 2021) with per-season and combined stats, ROI, side/fav splits.
+
+## Phase 11.4 Live Picks Integration
+- [x] Added `nfl_spread_v2/nfl_spread_picks.py` to generate today’s spread picks using Elo + logistic (no calibration), live ESPN spreads, odds_dir history.
+- [x] Added `/nfl/spread-picks` API endpoint returning picks + POTD.
+- [x] Added CLI `scripts/nfl_spread_picks_today.py --min-prob --refresh`.
+- [x] Added caching for model/ratings under `data/cache/nfl_spread_v2_model.pkl` with 24h TTL; progress logging for long runs.
+
+## Phase 11.5 Odds/Team Normalization
+- [x] Updated `scripts/odds_loader.py` to normalize team codes (WAS→WSH)
+- [x] Updated `scripts/ingest_nfl_odds.py` TEAM_MAP to map Washington variants to WSH and added extra aliases.
+
+## Completion Notes
+- Date(s): 2025-11-27
+- ROI snapshot: +10.9% at 0.55 threshold (per user backtests) on v2 spread model.
+- Remaining: Integrate calibrated path when ready, add more seasons/odds if available, optimize live odds source, and thread v2 into main backtest script only after validation if desired.
 
 # PHASE 4: Advanced Stats Integration (nfl_data_py)
 **Status:** ✅ Completed
